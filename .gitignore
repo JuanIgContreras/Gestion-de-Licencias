@@ -1,0 +1,15 @@
+# Entorno Virtual de Python
+# No subir esta carpeta, es específica de cada computadora
+venv/
+*.pyc
+
+# Archivos de caché de Python
+__pycache__/
+
+# Base de datos
+# NUNCA subas el archivo de la base de datos a un repositorio público
+database.db
+
+# Archivos de Excel con datos de usuarios
+# Estos archivos contienen información sensible
+*.xlsx

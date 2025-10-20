@@ -1,0 +1,318 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
+
+/* =================================
+   ESTILOS GENERALES Y DE PÁGINA
+   ================================= */
+body { font-family: 'Poppins', sans-serif; background-color: #f0f2f5; margin: 0; color: #333; }
+
+.login-page { 
+    display: flex; 
+    justify-content: center; 
+    align-items: center; 
+    height: 100vh;
+}
+
+.main-container { text-align: center; }
+.flash-container { width: 100%; box-sizing: border-box; }
+
+/* =================================
+   COMPONENTES DEL LOGIN
+   ================================= */
+.login-container { background-color: #ffffff; padding: 40px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); width: 100%; max-width: 400px; text-align: center; display: inline-block; box-sizing: border-box; }
+.login-container p { color: #6c757d; margin-bottom: 30px; }
+.login-container .input-group { margin-bottom: 20px; text-align: left; }
+.login-container .input-group label { display: block; margin-bottom: 5px; color: #495057; font-weight: 500; }
+.login-container input[type="text"], .login-container input[type="password"] { width: 100%; padding: 12px; border: 1px solid #ced4da; border-radius: 5px; box-sizing: border-box; }
+.login-container .btn { width: 100%; padding: 12px; border: none; border-radius: 5px; background-color: #007bff; color: white; font-size: 16px; font-weight: 600; cursor: pointer; transition: background-color 0.3s ease; }
+.login-container .btn:hover { background-color: #0056b3; }
+
+/* =================================
+   COMPONENTES DEL DASHBOARD Y ADMIN
+   ================================= */
+header { background-color: #ffffff; padding: 15px 30px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: flex; justify-content: space-between; align-items: center; }
+header h1 { margin: 0; font-size: 1.5em; font-weight: 600; }
+header div { display: flex; align-items: center; }
+.header-btn { 
+    text-decoration: none; 
+    background-color: #ffffff; 
+    color: rgb(0, 0, 0); 
+    padding: 8px 15px; 
+    border-radius: 5px; 
+    font-weight: 500; 
+    transition: background-color 0.3s ease; 
+    margin-left: 15px; 
+    cursor: pointer;
+    border: 1px solid #dee2e6;
+}
+.header-btn.logout { background-color: #dc3545; color: white; border-color: #dc3545;}
+.header-btn:hover { background-color: #f1f1f1; }
+.header-btn.logout:hover { background-color: #c82333; border-color: #c82333; }
+
+
+
+.main-content { padding: 30px; }
+.summary-panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 20px; }
+.panel { background-color: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 2px rgba(0,0,0,0.05); text-align: center; }
+.panel h3 { margin-top: 0; color: #6c757d; font-size: 1em; }
+.panel .count { font-size: 2.5em; font-weight: 700; color: #007bff; }
+.panel.approved .count { color: #28a745; }
+.panel.pending .count { color: #ffc107; }
+.panel.rejected .count { color: #dc3545; }
+
+.requests-table { width: 100%; border-collapse: collapse; margin-top: 20px; background-color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-radius: 8px; overflow: hidden; }
+.requests-table th, .requests-table td { padding: 15px; text-align: center; border-bottom: 1px solid #dee2e6; vertical-align: middle; }
+.requests-table thead th { background-color: #f8f9fa; font-weight: 600; color: #495057; }
+.requests-table tbody tr:hover { background-color: #f1f1f1; }
+.status-badge { padding: 5px 10px; border-radius: 15px; font-size: 0.8em; font-weight: 600; }
+.status-badge.approved { background-color: #d4edda; color: #155724; }
+.status-badge.pending { background-color: #fff3cd; color: #856404; }
+.status-badge.rejected { background-color: #f8d7da; color: #721c24; }
+
+
+/* =================================
+   PANELES DE SECCIÓN (ADMIN)
+   ================================= */
+.section-panel { background-color: #ffffff; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); margin-bottom: 30px; }
+.section-header { display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+.section-header h2 { margin: 0; padding: 0; border: none; }
+.section-content { display: none; margin-top: 25px; border-top: 1px solid #eee; padding-top: 25px; }
+.toggle-btn { background: transparent; border: none; cursor: pointer; padding: 5px; }
+.chevron-icon { width: 24px; height: 24px; color: #6c757d; transition: transform 0.3s ease; transform: rotate(-90deg); }
+.toggle-btn.is-open .chevron-icon { transform: rotate(0deg); }
+
+/* =================================
+   COMPONENTES DEL MODAL y NOVEDADES
+   ================================= */
+.modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.5); }
+.modal-content { background-color: #fefefe; margin: 10% auto; padding: 30px; border: 1px solid #888; width: 80%; max-width: 500px; border-radius: 8px; position: relative; }
+.close-btn { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
+.close-btn:hover, .close-btn:focus { color: black; }
+.form-group { margin-bottom: 15px; }
+.form-group label { display: block; margin-bottom: 5px; font-weight: 500; }
+.form-group input, .form-group select, .form-group textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+.submit-btn { background-color: #28a745; color: white; padding: 12px 20px; border: none; border-radius: 5px; cursor: pointer; font-size: 1em; width: 100%; }
+.submit-btn:hover { background-color: #218838; }
+.dashboard-layout { display: grid; grid-template-columns: 2fr 1fr; gap: 30px; margin-top: 30px; }
+.novedades-panel { background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+
+/* --- INICIO: ESTILOS MEJORADOS PARA NOVEDADES --- */
+.novedad-item { border-bottom: 1px solid #eee; padding-bottom: 15px; margin-bottom: 15px; }
+.novedad-item:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+.novedad-item h4 { 
+    margin: 0 0 10px 0; 
+    font-size: 1.1em;
+    font-weight: 600;
+}
+.novedad-item p { 
+    margin: 0; 
+    font-size: 0.95em; 
+    color: #495057;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    text-align: justify;
+}
+/* --- FIN: ESTILOS MEJORADOS PARA NOVEDADES --- */
+
+
+/* =================================
+   ESTILOS PARA MENSAJES (FLASH)
+   ================================= */
+.alert-success, .alert-info, .alert-warning, .alert-danger { padding: 15px; text-align: center; box-sizing: border-box; border: 1px solid; }
+.login-page .alert-success, .login-page .alert-info, .login-page .alert-warning, .login-page .alert-danger { max-width: 400px; width: 100%; margin-left: auto; margin-right: auto; margin-top: 20px; border-radius: 5px; }
+body:not(.login-page) .alert-success, body:not(.login-page) .alert-info, body:not(.login-page) .alert-warning, body:not(.login-page) .alert-danger { margin: 0; border-radius: 0; border-left: 0; border-right: 0; border-top: 0; border-bottom-width: 1px; }
+.top-alert { 
+    border-radius: 8px !important; 
+    margin-bottom: 20px; 
+    border: 1px solid;
+    opacity: 0;
+    transform: translateY(-20px);
+    transition: opacity 0.5s ease, transform 0.5s ease;
+}
+.alert-success { background-color: #d4edda; color: #155724; border-color: #c3e6cb; }
+.alert-info { background-color: #cce5ff; color: #004085; border-color: #b8daff; }
+.alert-warning { background-color: #fff3cd; color: #856404; border-color: #ffeeba; }
+.alert-danger { background-color: #f8d7da; color: #721c24; border-color: #f5c6cb; }
+
+/* =================================
+   ESTILOS PÁGINA MI PERFIL
+   ================================= */
+.profile-form-container { background-color: #ffffff; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); max-width: 700px; margin: 30px auto; }
+.profile-form-container h2 { margin: 0 0 25px 0; font-weight: 600; color: #343a40; }
+.profile-form-container h4 { margin: 30px 0 20px 0; font-weight: 500; color: #495057; }
+.form-group small { display: block; margin-top: 5px; color: #6c757d; font-size: 0.85em; }
+.form-group input:focus { outline: none; border-color: #007bff; box-shadow: 0 0 0 4px rgba(0, 123, 255, 0.15); }
+.profile-form-container hr { border: none; height: 1px; background-color: #e9ecef; margin: 40px 0; }
+.checkbox-label { display: flex; align-items: center; gap: 10px; font-weight: 500; cursor: pointer; }
+.checkbox-label input[type="checkbox"] { width: auto; }
+
+
+/* =================================
+   PESTAÑAS (TABS)
+   ================================= */
+.tabs { border-bottom: 2px solid #dee2e6; margin-bottom: 20px; }
+.tabs button { background-color: transparent; border: none; padding: 10px 20px; cursor: pointer; font-size: 1em; font-weight: 500; color: #6c757d; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+.tabs button.active { color: #007bff; border-bottom-color: #007bff; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* =================================
+   MENÚ DESPLEGABLE (DROPDOWN)
+   ================================= */
+.dropdown-container { position: relative; display: inline-block; }
+.user-menu-btn { 
+    display: flex; 
+    align-items: center; 
+    gap: 5px; 
+    border: none !important;
+}
+.dropdown-menu { display: none; position: absolute; right: 0; top: calc(100% + 5px); background-color: #ffffff; min-width: 200px; box-shadow: 0 8px 16px rgba(0,0,0,0.2); border-radius: 8px; z-index: 100; overflow: hidden; }
+.dropdown-menu.show { display: block; }
+.dropdown-item { color: #495057; padding: 12px 16px; text-decoration: none; display: block; font-size: 0.9em; font-weight: 500; }
+.dropdown-item:hover { background-color: #f1f1f1; }
+.dropdown-divider { height: 1px; margin: 0.5rem 0; overflow: hidden; background-color: #e9ecef; }
+.dropdown-item.logout { color: #dc3545; }
+.dropdown-item.logout:hover { background-color: #f8d7da; }
+
+/* =================================
+   MODAL DE DETALLES (ADMIN)
+   ================================= */
+.solicitud-details p { margin: 8px 0; font-size: 1.1em; }
+.solicitud-details .comment-box { background-color: #f8f9fa; border-left: 3px solid #ced4da; padding: 15px; margin-top: 15px; border-radius: 4px; }
+.solicitud-details .comment-box p { margin: 5px 0 0 0; font-style: italic; color: #6c757d; }
+.admin-actions h4 { margin-top: 0; }
+.admin-actions textarea { width: 100%; box-sizing: border-box; padding: 10px; margin-top: 10px; border: 1px solid #ccc; border-radius: 4px; font-family: 'Poppins', sans-serif; font-size: 1em; }
+.action-buttons-container { display: flex; justify-content: flex-end; gap: 15px; margin-top: 20px; }
+.action-buttons-container .action-btn { font-size: 1em; padding: 10px 20px; font-weight: 500; }
+
+/* =================================================================== */
+/* --- INICIO: BLOQUE DEFINITIVO PARA BOTONES DE ACCIÓN --- */
+/* =================================================================== */
+
+.requests-table td.actions-cell {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+}
+
+.requests-table td.actions-cell form {
+    margin: 0;
+}
+
+.action-btn {
+    /* --- AJUSTE DE TAMAÑO --- */
+    padding: 6px 12px;
+    font-size: 13px;
+    
+    /* --- Apariencia --- */
+    color: white;
+    font-family: 'Poppins', sans-serif;
+    font-weight: 500;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: transform 0.1s ease, background-color 0.2s ease;
+    white-space: nowrap;
+}
+
+.action-btn:hover {
+    transform: translateY(-1px);
+}
+
+/* --- Colores Específicos --- */
+
+.action-btn.edit { background-color: #007bff; }
+.action-btn.edit:hover { background-color: #0069d9; }
+.action-btn.view { background-color: #0d6efd; }
+.action-btn.view:hover { background-color: #0b5ed7; }
+.action-btn.deactivate { background-color: #6c757d; }
+.action-btn.deactivate:hover { background-color: #5a6268; }
+.action-btn.activate, .action-btn.approve { background-color: #28a745; }
+.action-btn.activate:hover, .action-btn.approve:hover { background-color: #218838; }
+.action-btn.reject { background-color: #dc3545; }
+.action-btn.reject:hover { background-color: #c82333; }
+.action-btn.rectify { background-color: #ffc107; color: #212529; }
+.action-btn.rectify:hover { background-color: #e0a800; }
+
+/* =================================================================== */
+/* --- FIN: BLOQUE DEFINITIVO PARA BOTONES DE ACCIÓN --- */
+/* =================================================================== */
+
+/* ============================== */
+/* BARRAS DE PROGRESO EN PANELES */
+/* ============================== */
+
+/* Contenedor de la barra */
+.progress-container {
+    margin-top: 15px;
+    background-color: #e9ecef;
+    border-radius: 10px;
+    height: 8px;
+    overflow: hidden;
+    position: relative;
+}
+
+/* Barra de progreso con ancho dinámico */
+.progress-bar {
+    width: var(--progress, 0%);
+    height: 100%;
+    border-radius: 10px;
+    transition: width 0.6s ease, background-color 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+/* Colores según clase */
+.progress-bar.danger {
+    background: linear-gradient(90deg, #dc3545, #c82333); /* rojo */
+}
+
+.progress-bar.warning {
+    background: linear-gradient(90deg, #ffc107, #e0a800); /* amarillo */
+}
+
+.progress-bar.success {
+    background: linear-gradient(90deg, #007bff, #0056b3); /* azul */
+}
+
+/* Brillo opcional */
+.progress-bar::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(
+        90deg,
+        transparent,
+        rgba(255, 255, 255, 0.4),
+        transparent
+    );
+    animation: shine 3s infinite;
+}
+
+@keyframes shine {
+    to { left: 100%; }
+}
+
+/* Etiqueta debajo de la barra */
+.progress-label {
+    margin-top: 8px;
+    font-size: 0.85em;
+    color: #6c757d;
+    font-weight: 500;
+}
+
+/* Responsive */
+@media screen and (max-width: 768px) {
+    .progress-container {
+        margin-top: 12px;
+        height: 6px;
+    }
+
+    .progress-label {
+        font-size: 0.8em;
+    }
+}
+

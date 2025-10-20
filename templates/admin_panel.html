@@ -1,0 +1,319 @@
+{% extends "base.html" %}
+
+{% block title %}Panel de Administrador{% endblock %}
+
+{% block content %}
+<header>
+    <h1>Panel de Administrador</h1>
+    <div>
+        <a href="{{ url_for('dashboard') }}" class="header-btn">Volver al Dashboard</a>
+        <a href="{{ url_for('logout') }}" class="header-btn logout">Cerrar Sesión</a>
+    </div>
+</header>
+
+<main class="main-content">
+    <div class="flash-container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert-{{ category }} top-alert">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+    </div>
+
+    <!-- SECCIÓN 1: GESTIÓN DE AGENTES -->
+    <div class="section-panel">
+        <div class="section-header">
+            <h2>Gestión de Agentes</h2>
+            <button class="toggle-btn">
+                <svg class="chevron-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+            </button>
+        </div>
+        <div class="section-content">
+            <button id="openCreateAgentModalBtn" class="submit-btn" style="width: auto; margin-bottom: 20px; background-color: #007bff;">+ Crear Nuevo Agente</button>
+            
+            <table class="requests-table">
+                <thead>
+                    <tr>
+                        <th style="text-align: left;">Nombre Completo</th>
+                        <th style="text-align: left;">Usuario</th>
+                        <th>Estado</th>
+                        <th class="actions-cell-header" style="width: 220px;">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for agente in agentes %}
+                    <tr id="agente-row-{{ agente.id }}">
+                        <td style="text-align: left;">{{ agente.nombre_completo }}</td>
+                        <td style="text-align: left;">{{ agente.usuario }}</td>
+                        <td>
+                            {% if agente.esta_activo %}<span class="status-badge approved">Activo</span>{% else %}<span class="status-badge rejected">Inactivo</span>{% endif %}
+                        </td>
+                        <td class="actions-cell">
+                            <button class="action-btn edit edit-agent-btn" 
+                                    data-id="{{ agente.id }}"
+                                    data-nombre="{{ agente.nombre_completo }}"
+                                    data-usuario="{{ agente.usuario }}"
+                                    data-enero="{{ agente.dias_enero }}"
+                                    data-julio="{{ agente.dias_julio }}"
+                                    data-comp="{{ agente.dias_compensatorios }}"
+                                    data-es-admin="{{ agente.es_admin|lower }}">
+                                Editar
+                            </button>
+
+                            {% if agente.id != admin_id %}
+                                {% if agente.esta_activo %}
+                                    <button type="button" class="action-btn deactivate toggle-agent-btn" data-id="{{ agente.id }}">Desactivar</button>
+                                {% else %}
+                                    <button type="button" class="action-btn activate toggle-agent-btn" data-id="{{ agente.id }}">Activar</button>
+                                {% endif %}
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="4">No hay agentes registrados.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- SECCIÓN 2: GESTIÓN DE SOLICITUDES -->
+    <div class="section-panel">
+        <div class="section-header">
+            <h2>Gestión de Solicitudes</h2>
+             <button class="toggle-btn">
+                 <svg class="chevron-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+            </button>
+        </div>
+        <div class="section-content">
+            <div class="tabs">
+                <button class="tab-button active" data-tab="pendientes">Pendientes ({{ pendientes|length }})</button>
+                <button class="tab-button" data-tab="aprobadas">Aprobadas</button>
+                <button class="tab-button" data-tab="rechazadas">Rechazadas</button>
+            </div>
+
+            <div id="pendientes" class="tab-content active">
+                <table class="requests-table">
+                    <thead><tr><th style="text-align: left;">Agente</th><th>Fecha</th><th>Días</th><th class="actions-cell-header">Acciones</th></tr></thead>
+                    <tbody>
+                        {% for s in pendientes %}
+                        <tr>
+                            <td style="text-align: left;">{{ s.agente.nombre_completo }}</td>
+                            <td>{{ s.fecha_inicio.strftime('%d/%m/%Y') }}</td>
+                            <td>{{ s.dias_solicitados }}</td>
+                            <td class="actions-cell"><button type="button" class="action-btn view view-details-btn" data-id="{{ s.id }}" data-agente="{{ s.agente.nombre_completo }}" data-tipo="{{ s.tipo_licencia }}" data-fecha="{{ s.fecha_inicio.strftime('%d/%m/%Y') }}" data-dias="{{ s.dias_solicitados }}" data-comentario="{{ s.comentario_agente or 'N/A' }}">Gestionar</button></td>
+                        </tr>
+                        {% else %}<tr><td colspan="4">No hay solicitudes pendientes.</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <div id="aprobadas" class="tab-content">
+                <table class="requests-table">
+                     <thead><tr><th style="text-align: left;">Agente</th><th style="text-align: left;">Tipo</th><th>Fecha</th><th class="actions-cell-header">Acciones</th></tr></thead>
+                    <tbody>
+                        {% for s in aprobadas %}
+                        <tr>
+                             <td style="text-align: left;">{{ s.agente.nombre_completo }}</td>
+                             <td style="text-align: left;">{{ s.tipo_licencia }}</td>
+                             <td>{{ s.fecha_inicio.strftime('%d/%m/%Y') }}</td>
+                             <td class="actions-cell"><form class="rectify-form" action="{{ url_for('rectificar_solicitud', id_solicitud=s.id) }}" method="POST"><button type="submit" class="action-btn rectify">Rectificar</button></form></td>
+                        </tr>
+                        {% else %}<tr><td colspan="4">No hay solicitudes aprobadas.</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <div id="rechazadas" class="tab-content">
+                 <table class="requests-table">
+                     <thead><tr><th style="text-align: left;">Agente</th><th style="text-align: left;">Tipo</th><th>Fecha</th><th class="actions-cell-header">Acciones</th></tr></thead>
+                    <tbody>
+                        {% for s in rechazadas %}
+                        <tr>
+                             <td style="text-align: left;">{{ s.agente.nombre_completo }}</td>
+                             <td style="text-align: left;">{{ s.tipo_licencia }}</td>
+                             <td>{{ s.fecha_inicio.strftime('%d/%m/%Y') }}</td>
+                             <td class="actions-cell"><form class="rectify-form" action="{{ url_for('rectificar_solicitud', id_solicitud=s.id) }}" method="POST"><button type="submit" class="action-btn rectify">Rectificar</button></form></td>
+                        </tr>
+                        {% else %}<tr><td colspan="4">No hay solicitudes rechazadas.</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- SECCIÓN 3: GESTIÓN DE NOVEDADES -->
+    <div class="section-panel">
+        <div class="section-header">
+            <h2>Gestión de Novedades</h2>
+             <button class="toggle-btn">
+                 <svg class="chevron-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+            </button>
+        </div>
+        <div class="section-content">
+            <button id="openNovedadModalBtn" class="submit-btn" style="width: auto; margin-bottom: 20px;">+ Publicar Novedad</button>
+            <table class="requests-table">
+                <thead><tr><th style="text-align: left;">Título</th><th class="actions-cell-header" style="width: 220px;">Acciones</th></tr></thead>
+                <tbody>
+                    {% for n in novedades %}
+                    <tr>
+                        <td style="text-align: left;">{{ n.titulo }}</td>
+                        <td class="actions-cell">
+                            <button class="action-btn edit edit-novedad-btn" data-id="{{ n.id }}" data-titulo="{{ n.titulo }}" data-mensaje="{{ n.mensaje }}">Editar</button>
+                            <form class="delete-novedad-form" action="{{ url_for('eliminar_novedad', id_novedad=n.id) }}" method="POST"><button type="submit" class="action-btn reject">Eliminar</button></form>
+                        </td>
+                    </tr>
+                    {% else %}<tr><td colspan="2">No hay novedades publicadas.</td></tr>{% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</main>
+
+<!-- ========= MODALES OCULTOS ========= -->
+
+<!-- Modal para Crear Agente -->
+<div id="createAgentModal" class="modal">
+    <div class="modal-content">
+        <span class="close-btn" id="closeCreateAgentModalBtn">&times;</span>
+        <h2>Crear Nuevo Agente</h2>
+        <form action="{{ url_for('crear_agente') }}" method="POST">
+            <div class="form-group">
+                <label for="create-nombre">Nombre Completo</label>
+                <input type="text" id="create-nombre" name="nombre_completo" required>
+            </div>
+            <div class="form-group">
+                <label for="create-usuario">Nombre de Usuario</label>
+                <input type="text" id="create-usuario" name="usuario" required>
+            </div>
+            <div class="form-group">
+                <label for="create-clave">Contraseña</label>
+                <input type="password" id="create-clave" name="clave" required>
+            </div>
+            <hr>
+            <div class="form-group" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px;">
+                <div>
+                    <label for="create-enero">Días Enero</label>
+                    <input type="number" id="create-enero" name="dias_enero" value="22" required>
+                </div>
+                <div>
+                    <label for="create-julio">Días Julio</label>
+                    <input type="number" id="create-julio" name="dias_julio" value="5" required>
+                </div>
+                <div>
+                    <label for="create-comp">Compensatorios</label>
+                    <input type="number" id="create-comp" name="dias_compensatorios" value="0" required>
+                </div>
+            </div>
+            <hr>
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" name="es_admin">
+                    Es Administrador
+                </label>
+            </div>
+            <button type="submit" class="submit-btn">Crear Agente</button>
+        </form>
+    </div>
+</div>
+
+<!-- Modal para Editar Agente -->
+<div id="editAgentModal" class="modal">
+    <div class="modal-content">
+        <span class="close-btn" id="closeEditAgentModalBtn">&times;</span>
+        <h2>Editar Agente</h2>
+        <form id="editAgentForm" method="POST">
+            <div class="form-group">
+                <label for="edit-nombre">Nombre Completo</label>
+                <input type="text" id="edit-nombre" name="nombre_completo" required>
+            </div>
+            <div class="form-group">
+                <label for="edit-usuario">Nombre de Usuario</label>
+                <input type="text" id="edit-usuario" name="usuario" required>
+            </div>
+            <hr>
+            <div class="form-group" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px;">
+                <div>
+                    <label for="edit-enero">Días Enero</label>
+                    <input type="number" id="edit-enero" name="dias_enero" required>
+                </div>
+                <div>
+                    <label for="edit-julio">Días Julio</label>
+                    <input type="number" id="edit-julio" name="dias_julio" required>
+                </div>
+                <div>
+                    <label for="edit-comp">Compensatorios</label>
+                    <input type="number" id="edit-comp" name="dias_compensatorios" required>
+                </div>
+            </div>
+            <hr>
+             <div class="form-group">
+                <label for="edit-nueva-clave">Resetear Contraseña (opcional)</label>
+                <input type="text" id="edit-nueva-clave" name="nueva_clave" placeholder="Dejar en blanco para no cambiar">
+            </div>
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="edit-es-admin" name="es_admin">
+                    Es Administrador
+                </label>
+            </div>
+            <button type="submit" class="submit-btn">Guardar Cambios</button>
+        </form>
+    </div>
+</div>
+
+<!-- Modal para gestionar Solicitudes Pendientes -->
+<div id="solicitudDetailModal" class="modal">
+    <div class="modal-content">
+        <span class="close-btn" id="closeDetailModalBtn">&times;</span>
+        <h2>Detalles de la Solicitud</h2>
+        <div class="solicitud-details">
+            <p><strong>Agente:</strong> <span id="detail-agente"></span></p>
+            <p><strong>Tipo:</strong> <span id="detail-tipo"></span></p>
+            <p><strong>Fecha Inicio:</strong> <span id="detail-fecha"></span></p>
+            <p><strong>Días:</strong> <span id="detail-dias"></span></p>
+            <div class="comment-box"><p id="detail-comentario"></p></div>
+        </div>
+        <hr>
+        <div class="admin-actions">
+            <h4>Comentario de RRHH (Opcional)</h4>
+            <textarea id="comentario_admin_text" rows="3" placeholder="Ej: Aprobado, pero coordinar con tu equipo."></textarea>
+            <div class="action-buttons-container">
+                <form id="reject-form" method="POST" style="display: inline;"><input type="hidden" name="comentario_admin"><button type="submit" class="action-btn reject">Rechazar</button></form>
+                <form id="approve-form" method="POST" style="display: inline;"><input type="hidden" name="comentario_admin"><button type="submit" class="action-btn approve">Aprobar</button></form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal para Añadir Novedad -->
+<div id="addNovedadModal" class="modal">
+    <div class="modal-content">
+        <span class="close-btn" id="closeAddModalBtn">&times;</span>
+        <h2>Publicar Nueva Novedad</h2>
+        <form action="{{ url_for('publicar_novedad') }}" method="POST">
+            <div class="form-group"><label for="titulo">Título</label><input type="text" name="titulo" required></div>
+            <div class="form-group"><label for="mensaje">Mensaje</label><textarea name="mensaje" rows="4" required></textarea></div>
+            <button type="submit" class="submit-btn">Publicar</button>
+        </form>
+    </div>
+</div>
+
+<!-- Modal para Editar Novedad -->
+<div id="editNovedadModal" class="modal">
+    <div class="modal-content">
+        <span class="close-btn" id="closeEditModalBtn">&times;</span>
+        <h2>Editar Novedad</h2>
+        <form id="editNovedadForm" method="POST">
+            <div class="form-group"><label for="edit-titulo">Título</label><input type="text" id="edit-titulo" name="titulo" required></div>
+            <div class="form-group"><label for="edit-mensaje">Mensaje</label><textarea id="edit-mensaje" name="mensaje" rows="4" required></textarea></div>
+            <button type="submit" class="submit-btn">Guardar Cambios</button>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
