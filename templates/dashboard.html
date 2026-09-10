@@ -20,16 +20,22 @@
         <h1>Hola, {{ agente.nombre_completo }}</h1>
         <div>
             <div class="dropdown-container">
+
                 <button id="userMenuBtn" class="header-btn user-menu-btn">
                     <span>Acciones</span>
                     <svg class="chevron-icon" style="transform: rotate(0deg);" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
                 </button>
                 <div id="userMenuDropdown" class="dropdown-menu">
                     <a href="#" id="openModalBtn" class="dropdown-item">+ Solicitar Nueva Licencia</a>
+                    <a href="#" id="openCalendarioBtn" class="dropdown-item">📅 Ver Calendario</a>
                     <a href="{{ url_for('mi_perfil') }}" class="dropdown-item">Mis Datos</a>
                     {% if agente.es_admin %}
-                       <a href="{{ url_for('panel_admin') }}" class="dropdown-item" style="color: #007bff;">Panel de Admin</a>
-
+                        <a href="{{ url_for('panel_admin') }}" class="dropdown-item admin-alert">
+        Panel de Admin
+        {% if total_pendientes_global > 0 %}
+            <span class="badge-alert">{{ total_pendientes_global }}</span>
+        {% endif %}
+    </a>
                     {% endif %}
                     <div class="dropdown-divider"></div>
                     <a href="{{ url_for('logout') }}" class="dropdown-item logout">Cerrar Sesión</a>
@@ -39,194 +45,288 @@
     </header>
 
     <main class="main-content">
-        
-<div class="summary-panels">
-    <!-- Vacaciones Enero -->
-    <div class="panel">
-        <h3>VACACIONES ENERO</h3>
-        <p class="count">{{ agente.dias_enero }}</p>
 
-        {% set total_enero = 22 %}
-        {% set porcentaje_enero = (agente.dias_enero / total_enero * 100)|int %}
+        <div class="summary-panels">
+            {% for saldo in saldos %}
+            <div class="panel">
+                <h3>{{ saldo.label|upper }}</h3>
+                <p class="count">{{ saldo.disponibles }}</p>
 
-        <div class="progress-container">
-            <div class="progress-bar 
-                {% if porcentaje_enero < 25 %}danger
-                {% elif porcentaje_enero < 50 %}warning
-                {% else %}success
-                {% endif %}"
-                style="--progress: {{ [porcentaje_enero, 100]|min }}%;">
+                {% set porcentaje = (saldo.disponibles / saldo.asignados * 100)|int if saldo.asignados > 0 else 0 %}
+                <div class="progress-container">
+                    <div class="progress-bar
+                        {% if porcentaje < 25 %}danger
+                        {% elif porcentaje < 50 %}warning
+                        {% else %}success
+                        {% endif %}"
+                        style="--progress: {{ [porcentaje, 100]|min }}%;">
+                    </div>
+                </div>
+                <p class="progress-label">
+                    {{ saldo.disponibles }} de {{ saldo.asignados }} días disponibles
+                    {% if saldo.pendientes > 0 %}<br><span class="saldo-pendiente-nota">({{ saldo.pendientes }} reservado{{ 's' if saldo.pendientes != 1 else '' }} en solicitudes pendientes)</span>{% endif %}
+                </p>
             </div>
+            {% endfor %}
         </div>
-        <p class="progress-label">{{ agente.dias_enero }} de {{ total_enero }} días disponibles</p>
-    </div>
-
-    <!-- Vacaciones Julio -->
-    <div class="panel">
-        <h3>VACACIONES JULIO</h3>
-        <p class="count">{{ agente.dias_julio }}</p>
-
-        {% set total_julio = 5 %}
-        {% set porcentaje_julio = (agente.dias_julio / total_julio * 100)|int %}
-
-        <div class="progress-container">
-            <div class="progress-bar 
-                {% if porcentaje_julio < 25 %}danger
-                {% elif porcentaje_julio < 50 %}warning
-                {% else %}success
-                {% endif %}"
-                style="--progress: {{ [porcentaje_julio, 100]|min }}%;">
-            </div>
-        </div>
-        <p class="progress-label">{{ agente.dias_julio }} de {{ total_julio }} días disponibles</p>
-    </div>
-
-<div class="panel">
-        <h3>COMPENSATORIOS</h3>
-        
-        <p class="count">{{ agente.dias_compensatorios_restantes }}</p>
-
-        {% set total_comp = agente.dias_compensatorios_inicial %}
-        
-        {% if total_comp > 0 %}
-            {% set porcentaje_comp = (agente.dias_compensatorios_restantes / total_comp * 100)|int %}
-        {% else %}
-            {% set porcentaje_comp = 0 %}
-        {% endif %}
-
-        <div class="progress-container">
-            <div class="progress-bar 
-                {% if porcentaje_comp < 25 %}danger
-                {% elif porcentaje_comp < 50 %}warning
-                {% else %}success
-                {% endif %}"
-                style="--progress: {{ [porcentaje_comp, 100]|min }}%;">
-            </div>
-        </div>
-        
-        <p class="progress-label">{{ agente.dias_compensatorios_restantes }} de {{ total_comp }} días disponibles</p>
-    </div>
-</div>
 
         <div class="summary-panels" style="margin-top: 20px;">
             <div class="panel approved"><h3>APROBADAS</h3><p class="count">{{ conteos.aprobadas }}</p></div>
             <div class="panel pending"><h3>PENDIENTES</h3><p class="count">{{ conteos.pendientes }}</p></div>
             <div class="panel rejected"><h3>RECHAZADAS</h3><p class="count">{{ conteos.rechazadas }}</p></div>
         </div>
-        
-        <div class="dashboard-layout">
-            <div class="solicitudes-section">
-                <h2>Mis Solicitudes</h2>
-                <table class="requests-table">
-                    <thead>
-                        <tr>
-                            <th>Tipo de Licencia</th>
-                            <th>Fecha de Inicio</th>
-                            <th>Días Solicitados</th>
-                            <th>Estado</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for solicitud in solicitudes %}
-                        <tr>
-                            <td data-label="Tipo de Licencia">{{ solicitud.tipo_licencia }}</td>
-                            <td data-label="Fecha de Inicio">{{ solicitud.fecha_inicio.strftime('%d/%m/%Y') }}</td>
-                            <td data-label="Días Solicitados">{{ solicitud.dias_solicitados }}</td>
-                            <td data-label="Estado" class="actions-cell">
-                                {% if solicitud.estado == 'Aprobada' %}
-                                    <span class="status-badge approved">Aprobada</span>
-                                {% elif solicitud.estado == 'Pendiente' %}
-                                    <span class="status-badge pending">Pendiente</span>
-                                {% elif solicitud.estado == 'Rechazada' %}
-                                    <span class="status-badge rejected">Rechazada</span>
-                                {% endif %}
 
-                                {% if solicitud.estado != 'Pendiente' %}
-                                <button type="button" class="action-btn view view-agent-details-btn"
-                                        data-tipo="{{ solicitud.tipo_licencia }}"
-                                        data-fecha="{{ solicitud.fecha_inicio.strftime('%d/%m/%Y') }}"
-                                        data-dias="{{ solicitud.dias_solicitados }}"
-                                        data-estado="{{ solicitud.estado }}"
-                                        data-comentario-agente="{{ solicitud.comentario_agente or 'Sin comentarios.' }}"
-                                        data-comentario-admin="{{ solicitud.comentario_admin or 'Sin comentarios de RRHH.' }}">
-                                    Ver
-                                </button>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% else %}
-                        <tr>
-                            <td colspan="4" style="text-align: center; padding: 20px;">No tienes solicitudes registradas.</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+<div class="dashboard-layout grid-permisos">
+    <!-- === MIS SOLICITUDES === -->
+    <div class="solicitudes-section panel-equal">
+        <h2>Mis Solicitudes</h2>
+        <table class="requests-table">
+            <thead>
+                <tr>
+                    <th>Tipo de Licencia</th>
+                    <th>Fecha de Inicio</th>
+                    <th>Fecha de Fin</th>
+                    <th>Días Hábiles</th>
+                    <th>Estado</th>
+                </tr>
+            </thead>
+<tbody>
+{% for solicitud in solicitudes %}
+    {% set label_tipo = categorias_todas.get(solicitud.tipo_licencia, {}).get('label', solicitud.tipo_licencia) %}
+    <tr>
+        <td data-label="Tipo de Licencia">{{ label_tipo }}{% if solicitud.es_oficio %} <span class="status-badge oficio">Oficio</span>{% endif %}</td>
+        <td data-label="Fecha de Inicio">{{ solicitud.fecha_inicio.strftime('%d/%m/%Y') }}</td>
+        <td data-label="Fecha de Fin">{{ solicitud.fecha_fin.strftime('%d/%m/%Y') if solicitud.fecha_fin else '-' }}</td>
+        <td data-label="Días Hábiles">{{ solicitud.dias_solicitados }}</td>
+        <td data-label="Estado" class="actions-cell">
+
+            {% if solicitud.estado == 'Aprobada' %}
+                <span class="status-badge approved">Aprobada</span>
+                <button type="button" class="action-btn view view-agent-details-btn"
+                        data-tipo="{{ label_tipo }}"
+                        data-fecha="{{ solicitud.fecha_inicio.strftime('%d/%m/%Y') }}"
+                        data-fecha-fin="{{ solicitud.fecha_fin.strftime('%d/%m/%Y') if solicitud.fecha_fin else '-' }}"
+                        data-dias="{{ solicitud.dias_solicitados }}"
+                        data-estado="{{ solicitud.estado }}"
+                        data-comentario-agente="{{ solicitud.comentario_agente or 'Sin comentarios.' }}"
+                        data-comentario-admin="{{ solicitud.comentario_admin or 'Sin comentarios de RRHH.' }}">
+                    Ver
+                </button>
+
+            {% elif solicitud.estado == 'Pendiente' %}
+    <span class="status-badge pending">Pendiente</span>
+    <button
+        type="button"
+        class="action-btn icon-only"
+        title="Editar solicitud"
+        onclick="abrirModalEditarSolicitud(
+            '{{ solicitud.id }}',
+            '{{ solicitud.tipo_licencia }}',
+            '{{ solicitud.fecha_inicio }}',
+            '{{ solicitud.fecha_fin }}',
+            '{{ solicitud.comentario_agente|default('', true)|replace("'", "\\'")|replace("\n", " ") }}'
+        )">
+        ✏️
+    </button>
+    <button
+        type="button"
+        class="action-btn icon-only delete"
+        title="Eliminar solicitud"
+        onclick="confirmarEliminarSolicitud('{{ solicitud.id }}')">
+        🗑️
+    </button>
+
+            {% elif solicitud.estado == 'Rechazada' %}
+                <span class="status-badge rejected">Rechazada</span>
+                <button type="button" class="action-btn view view-agent-details-btn"
+                        data-tipo="{{ label_tipo }}"
+                        data-fecha="{{ solicitud.fecha_inicio.strftime('%d/%m/%Y') }}"
+                        data-fecha-fin="{{ solicitud.fecha_fin.strftime('%d/%m/%Y') if solicitud.fecha_fin else '-' }}"
+                        data-dias="{{ solicitud.dias_solicitados }}"
+                        data-estado="{{ solicitud.estado }}"
+                        data-comentario-agente="{{ solicitud.comentario_agente or 'Sin comentarios.' }}"
+                        data-comentario-admin="{{ solicitud.comentario_admin or 'Sin comentarios de RRHH.' }}">
+                    Ver
+                </button>
+            {% endif %}
+
+        </td>
+    </tr>
+{% else %}
+    <tr>
+        <td colspan="5" style="text-align: center; padding: 20px;">No tienes solicitudes registradas.</td>
+    </tr>
+{% endfor %}
+</tbody>
+
+        </table>
+    </div>
+
+    <!-- === NOVEDADES === -->
+    <div class="novedades-panel">
+        <h2>Novedades de RRHH</h2>
+        {% for novedad in novedades %}
+            <div class="novedad-item">
+                <h4>{{ novedad.titulo }}</h4>
+                <p>{{ novedad.mensaje }}</p>
             </div>
-            <div class="novedades-panel">
-                <h2>Novedades de RRHH</h2>
-                {% for novedad in novedades %}
-                    <div class="novedad-item">
-                        <h4>{{ novedad.titulo }}</h4>
-                        <!-- El filtro |safe es clave para renderizar el formato HTML -->
-                        <p>{{ novedad.mensaje | safe }}</p>
-                    </div>
-                {% else %}
-                    <p>No hay novedades publicadas.</p>
-                {% endfor %}
-            </div>
-        </div>
+        {% else %}
+            <p>No hay novedades publicadas.</p>
+        {% endfor %}
+    </div>
+</div>
+
     </main>
 
-    <!-- Modales -->
-    <div id="requestModal" class="modal">
-        <div class="modal-content">
-            <span class="close-btn" id="closeRequestModalBtn">&times;</span>
-            <h2>Nueva Solicitud de Licencia</h2>
-            <form method="POST" action="{{ url_for('nueva_solicitud') }}">
-                <div class="form-group">
-                    <label for="tipo_licencia">Tipo de Licencia</label>
-                    <select id="tipo_licencia" name="tipo_licencia">
-                        <option value="Vacaciones Enero">Vacaciones Enero</option>
-                        <option value="Vacaciones Julio">Vacaciones Julio</option>
-                        <option value="Compensatorios">Compensatorios</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="fecha_inicio">Fecha de Inicio</label>
-                    <input type="date" id="fecha_inicio" name="fecha_inicio" required>
-                </div>
-                <div class="form-group">
-                    <label for="dias_solicitados">Días Solicitados</label>
-                    <input type="number" id="dias_solicitados" name="dias_solicitados" min="1" required>
-                </div>
-                <div class="form-group">
-                    <label for="comentario_agente">Comentarios (opcional)</label>
-                    <textarea id="comentario_agente" name="comentario_agente" rows="3"></textarea>
-                </div>
-                <button type="submit" class="submit-btn">Enviar Solicitud</button>
-            </form>
-        </div>
+ <!-- MODAL NUEVA SOLICITUD DE LICENCIA -->
+<div id="requestModal" class="modal">
+  <div class="modal-content">
+    <span class="close-btn" id="closeRequestModalBtn">&times;</span>
+    <h2>Nueva Solicitud de Licencia</h2>
+
+    <div class="info-banner">
+        ⏰ <strong>Regla de antelación:</strong> toda solicitud debe cargarse a más tardar el
+        <strong>último día hábil previo hasta las 20:30hs</strong> (ej: para ausentarte un lunes, el corte es el
+        viernes anterior a las 20:30hs). Los días se cuentan hábiles administrativos (no se cuentan sábados,
+        domingos ni feriados). Para una ausencia excepcional o del mismo día, comunicate por teléfono con RRHH.
     </div>
 
-    <div id="agentSolicitudDetailModal" class="modal">
-        <div class="modal-content">
-            <span class="close-btn" id="closeAgentDetailModalBtn">&times;</span>
-            <h2>Detalles de la Solicitud</h2>
-            <div class="solicitud-details">
-                <p><strong>Tipo de Licencia:</strong> <span id="agent-detail-tipo"></span></p>
-                <p><strong>Fecha de Inicio:</strong> <span id="agent-detail-fecha"></span></p>
-                <p><strong>Días Solicitados:</strong> <span id="agent-detail-dias"></span></p>
-                <p><strong>Estado:</strong> <span id="agent-detail-estado"></span></p>
-                <div class="comment-box">
-                    <strong>Tu Comentario:</strong>
-                    <p id="agent-detail-comentario-agente"></p>
-                </div>
-                <div class="comment-box" style="border-left-color: #007bff; margin-top: 10px;">
-                    <strong>Comentario de RRHH:</strong>
-                    <p id="agent-detail-comentario-admin"></p>
-                </div>
-            </div>
-        </div>
+    <form id="licenciaForm" action="{{ url_for('nueva_solicitud') }}" method="POST">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="form-group">
+        <label for="tipo_licencia">Tipo de Licencia</label>
+        <select id="tipo_licencia" name="tipo_licencia" required>
+          {% for codigo, meta in categorias.items() %}
+          <option value="{{ codigo }}">{{ meta.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="fecha_inicio">Fecha de Inicio</label>
+        <input type="date" id="fecha_inicio" name="fecha_inicio" required>
+      </div>
+
+      <div class="form-group">
+        <label for="fecha_fin">Fecha de Fin</label>
+        <input type="date" id="fecha_fin" name="fecha_fin" required>
+      </div>
+
+      <div id="diasHabilesPreview" class="dias-habiles-preview" hidden></div>
+      <div id="superposicionAlerta" class="overlap-banner" hidden></div>
+
+      <div class="form-group">
+        <label for="comentario_agente">Comentario</label>
+        <textarea id="comentario_agente" name="comentario_agente"></textarea>
+      </div>
+
+      <button type="button" id="previewLicenciaBtn" class="submit-btn">Previsualizar Solicitud</button>
+    </form>
+  </div>
+</div>
+
+<!-- MODAL DETALLE DE SOLICITUD -->
+<div id="agentSolicitudDetailModal" class="modal">
+  <div class="modal-content">
+    <span class="close-btn" id="closeAgentDetailModalBtn">&times;</span>
+    <h2>Detalles de la Solicitud</h2>
+    <div class="solicitud-details">
+      <p><strong>Tipo de Licencia:</strong> <span id="agent-detail-tipo"></span></p>
+      <p><strong>Fecha de Inicio:</strong> <span id="agent-detail-fecha"></span></p>
+      <p><strong>Fecha de Fin:</strong> <span id="agent-detail-fecha-fin"></span></p>
+      <p><strong>Días Hábiles:</strong> <span id="agent-detail-dias"></span></p>
+      <p><strong>Estado:</strong> <span id="agent-detail-estado"></span></p>
+      <div class="comment-box">
+        <strong>Tu Comentario:</strong>
+        <p id="agent-detail-comentario-agente"></p>
+      </div>
+      <div class="comment-box" style="border-left-color: #007bff; margin-top: 10px;">
+        <strong>Comentario de RRHH:</strong>
+        <p id="agent-detail-comentario-admin"></p>
+      </div>
     </div>
-    
+  </div>
+</div>
+
+<!-- MODAL DE PREVISUALIZACIÓN DE LICENCIA -->
+<div id="previewLicenciaModal" class="modal">
+  <div class="modal-content">
+    <span class="close-btn" id="closePreviewLicenciaBtn">&times;</span>
+    <h3>Confirmar solicitud de licencia</h3>
+    <p><strong>Tipo:</strong> <span id="prevLicTipo"></span></p>
+    <p><strong>Fecha inicio:</strong> <span id="prevLicInicio"></span></p>
+    <p><strong>Fecha fin:</strong> <span id="prevLicFin"></span></p>
+    <p><strong>Comentario:</strong> <span id="prevLicComentario"></span></p>
+
+    <div style="display:flex;justify-content:space-between;margin-top:20px;">
+      <button type="button" id="editLicenciaBtn" class="header-btn">Editar</button>
+      <button type="button" id="confirmLicenciaBtn" class="submit-btn">Confirmar y Enviar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL EDITAR SOLICITUD -->
+<div id="editarSolicitudModal" class="modal">
+  <div class="modal-content">
+    <span class="close-btn" id="closeEditarSolicitudBtn">&times;</span>
+    <h3>Editar Solicitud</h3>
+    <form id="editarSolicitudForm" method="POST" action="{{ url_for('editar_solicitud_modal') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" id="edit_id" name="id_solicitud">
+
+      <div class="form-group">
+        <label for="edit_tipo_licencia">Tipo de Licencia</label>
+        <select id="edit_tipo_licencia" name="tipo_licencia" required>
+          {% for codigo, meta in categorias.items() %}
+          <option value="{{ codigo }}">{{ meta.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="edit_fecha_inicio">Fecha de Inicio</label>
+        <input type="date" id="edit_fecha_inicio" name="fecha_inicio" required>
+      </div>
+
+      <div class="form-group">
+        <label for="edit_fecha_fin">Fecha de Fin</label>
+        <input type="date" id="edit_fecha_fin" name="fecha_fin" required>
+      </div>
+
+      <div class="form-group">
+        <label for="edit_comentario_agente">Comentario</label>
+        <textarea id="edit_comentario_agente" name="comentario_agente" rows="3"></textarea>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;margin-top:20px;">
+        <button type="button" id="cancelarEdicionBtn" class="header-btn">Cancelar</button>
+        <button type="submit" class="submit-btn">Guardar Cambios</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- MODAL CALENDARIO DE LICENCIAS -->
+<div id="calendarioModal" class="modal">
+  <div class="modal-content" style="max-width: 900px;">
+    <span class="close-btn" id="closeCalendarioBtn">&times;</span>
+    <h2 style="text-align: center; margin-bottom: 10px;">Calendario de Licencias</h2>
+
+    <div class="calendario-header">
+      <button type="button" class="header-btn" id="mesAnteriorBtn">← Anterior</button>
+      <h3 id="mesActualTexto">Enero 2025</h3>
+      <button type="button" class="header-btn" id="mesSiguienteBtn">Siguiente →</button>
+    </div>
+
+    <div id="calendarioGrid" class="calendario-grid">
+      <!-- Se generará dinámicamente con JavaScript -->
+    </div>
+
+    <div id="licenciasLista" class="licencias-lista">
+      <h4>Licencias del mes:</h4>
+      <div id="licenciasContenido"></div>
+    </div>
+  </div>
+</div>
+
 {% endblock %}

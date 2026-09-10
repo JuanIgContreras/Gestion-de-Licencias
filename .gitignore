@@ -9,6 +9,10 @@ __pycache__/
 # Base de datos
 # NUNCA subas el archivo de la base de datos a un repositorio público
 database.db
+database.backup-*.db
+
+# Clave secreta generada automáticamente en el primer arranque
+.secret_key
 
 # Archivos de Excel con datos de usuarios
 # Estos archivos contienen información sensible

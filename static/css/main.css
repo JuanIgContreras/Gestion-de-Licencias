@@ -26,6 +26,25 @@ body { font-family: 'Poppins', sans-serif; background-color: #f0f2f5; margin: 0;
 .login-container .btn { width: 100%; padding: 12px; border: none; border-radius: 5px; background-color: #007bff; color: white; font-size: 16px; font-weight: 600; cursor: pointer; transition: background-color 0.3s ease; }
 .login-container .btn:hover { background-color: #0056b3; }
 
+/* --- INICIO: Estilos para "Olvidaste Contraseña" --- */
+.forgot-password-container {
+    margin-top: 25px;
+    text-align: center;
+}
+
+.forgot-password-container a {
+    color: #007bff;
+    text-decoration: none;
+    font-size: 0.9em;
+    font-weight: 500;
+}
+
+.forgot-password-container a:hover {
+    text-decoration: underline;
+}
+/* --- FIN: Estilos para "Olvidaste Contraseña" --- */
+
+
 /* =================================
    COMPONENTES DEL DASHBOARD Y ADMIN
    ================================= */
@@ -51,10 +70,10 @@ header div { display: flex; align-items: center; }
 
 
 .main-content { padding: 30px; }
-.summary-panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 20px; }
-.panel { background-color: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 2px rgba(0,0,0,0.05); text-align: center; }
-.panel h3 { margin-top: 0; color: #6c757d; font-size: 1em; }
-.panel .count { font-size: 2.5em; font-weight: 700; color: #007bff; }
+.summary-panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; }
+.panel { background-color: #fff; padding: 10px; border-radius: 8px; box-shadow: 0 2px 2px rgba(0,0,0,0.05); text-align: center; }
+.panel h3 { margin-top: 0; color: #6c757d; font-size: 11px; line-height: 1.3; }
+.panel .count { font-size: 1.6em; font-weight: 700; color: #007bff; }
 .panel.approved .count { color: #28a745; }
 .panel.pending .count { color: #ffc107; }
 .panel.rejected .count { color: #dc3545; }
@@ -67,6 +86,41 @@ header div { display: flex; align-items: center; }
 .status-badge.approved { background-color: #d4edda; color: #155724; }
 .status-badge.pending { background-color: #fff3cd; color: #856404; }
 .status-badge.rejected { background-color: #f8d7da; color: #721c24; }
+.status-badge.oficio { background-color: #e2d9f3; color: #4a2e8c; margin-left: 5px; }
+
+/* Banner informativo (regla de antelación, etc.) */
+.info-banner {
+    background-color: #eaf4ff;
+    border: 1px solid #b8daff;
+    color: #004085;
+    border-radius: 6px;
+    padding: 12px 15px;
+    margin-bottom: 18px;
+    font-size: 0.9em;
+    line-height: 1.5;
+}
+
+.overlap-banner {
+    background-color: #fff3cd;
+    border: 1px solid #ffeeba;
+    color: #856404;
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 15px;
+    font-size: 0.85em;
+}
+
+.dias-habiles-preview {
+    color: #6c757d;
+    font-size: 0.85em;
+    margin: -10px 0 15px 0;
+}
+
+.saldo-pendiente-nota {
+    color: #856404;
+    font-size: 0.85em;
+    font-weight: 500;
+}
 
 
 /* =================================
@@ -83,8 +137,42 @@ header div { display: flex; align-items: center; }
 /* =================================
    COMPONENTES DEL MODAL y NOVEDADES
    ================================= */
-.modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.5); }
-.modal-content { background-color: #fefefe; margin: 10% auto; padding: 30px; border: 1px solid #888; width: 80%; max-width: 500px; border-radius: 8px; position: relative; }
+/* ================================= 
+   COMPONENTES DEL MODAL - CORREGIDO
+================================= */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0,0,0,0.5);
+    /* AGREGADO: Flex para centrar */
+    align-items: center;
+    justify-content: center;
+}
+
+/* Cuando el modal está visible */
+.modal[style*="display: flex"],
+.modal[style*="display: block"] {
+    display: flex !important;
+}
+
+.modal-content {
+    background-color: #fefefe;
+    margin: auto; /* Cambiado de "10% auto" a "auto" */
+    padding: 30px;
+    border: 1px solid #888;
+    width: 90%;
+    max-width: 500px;
+    border-radius: 8px;
+    position: relative;
+    max-height: 90vh; /* Para evitar que se salga de pantalla */
+    overflow-y: auto; /* Scroll si el contenido es muy largo */
+}
 .close-btn { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
 .close-btn:hover, .close-btn:focus { color: black; }
 .form-group { margin-bottom: 15px; }
@@ -200,11 +288,8 @@ body:not(.login-page) .alert-success, body:not(.login-page) .alert-info, body:no
 }
 
 .action-btn {
-    /* --- AJUSTE DE TAMAÑO --- */
     padding: 6px 12px;
     font-size: 13px;
-    
-    /* --- Apariencia --- */
     color: white;
     font-family: 'Poppins', sans-serif;
     font-weight: 500;
@@ -244,10 +329,10 @@ body:not(.login-page) .alert-success, body:not(.login-page) .alert-info, body:no
 
 /* Contenedor de la barra */
 .progress-container {
-    margin-top: 15px;
+    margin-top: 6px;
     background-color: #e9ecef;
     border-radius: 10px;
-    height: 8px;
+    height: 5px;
     overflow: hidden;
     position: relative;
 }
@@ -298,8 +383,8 @@ body:not(.login-page) .alert-success, body:not(.login-page) .alert-info, body:no
 
 /* Etiqueta debajo de la barra */
 .progress-label {
-    margin-top: 8px;
-    font-size: 0.85em;
+    margin-top: 5px;
+    font-size: 11px;
     color: #6c757d;
     font-weight: 500;
 }
@@ -307,12 +392,252 @@ body:not(.login-page) .alert-success, body:not(.login-page) .alert-info, body:no
 /* Responsive */
 @media screen and (max-width: 768px) {
     .progress-container {
-        margin-top: 12px;
-        height: 6px;
+        margin-top: 6px;
+        height: 5px;
     }
 
     .progress-label {
-        font-size: 0.8em;
+        font-size: 11px;
     }
 }
 
+/* Oculta la notificación de la API de TinyMCE */
+.tox-notifications-container {
+    display: none !important;
+}
+
+/* ================================================
+   AJUSTE FINAL: ALINEACIÓN VISUAL CON PANELES SUPERIORES
+   ================================================ */
+.dashboard-layout.grid-permisos {
+    display: grid;
+    grid-template-columns: 1fr; /* Mis Solicitudes ocupa todo el ancho; Novedades queda debajo */
+    gap: 20px;
+    align-items: start;
+    margin-top: 30px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+/* Panel base */
+.panel-equal {
+    background-color: #ffffff;
+    border-radius: 10px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+}
+
+.panel-equal h2 {
+    font-size: 1.2rem;
+    font-weight: 600;
+    margin-bottom: 15px;
+}
+
+/* Tabla interna */
+.panel-equal table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+/* Bloque Novedades debajo */
+.novedades-panel {
+    grid-column: 1 / -1;
+    margin-top: 30px;
+    background: #fff;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+}
+
+/* Responsivo */
+@media (max-width: 992px) {
+    .dashboard-layout.grid-permisos {
+        grid-template-columns: 1fr;
+        max-width: 100%;
+    }
+}
+
+h2 .badge-pendientes {
+    background-color: #ffc107;
+    color: #212529;
+    font-size: 0.85em;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 12px;
+    margin-left: 8px;
+}
+/* =======================================================
+   Alerta de pendientes en el menú del administrador
+   ======================================================= */
+.badge-alert {
+    background-color: #dc3545;
+    color: white;
+    font-size: 0.8em;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 10px;
+    margin-left: 8px;
+}
+
+.dropdown-item.admin-alert {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.action-btn.icon-only.delete {
+  color: #dc3545;
+  margin-left: 4px;
+}
+
+.action-btn.icon-only.delete:hover {
+  color: #a71d2a;
+  transform: scale(1.15);
+}
+
+/* =================================
+   CALENDARIO DE LICENCIAS
+   ================================= */
+.calendario-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding: 15px;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+}
+
+.calendario-header h3 {
+    margin: 0;
+    font-size: 1.3em;
+    color: #333;
+}
+
+.calendario-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 8px;
+    margin-bottom: 30px;
+}
+
+.calendario-dia-nombre {
+    background-color: #007bff;
+    color: white;
+    padding: 10px;
+    text-align: center;
+    font-weight: 600;
+    border-radius: 5px;
+    font-size: 0.9em;
+}
+
+.calendario-dia {
+    background-color: #ffffff;
+    border: 1px solid #dee2e6;
+    border-radius: 5px;
+    min-height: 80px;
+    padding: 8px;
+    position: relative;
+    transition: background-color 0.2s ease;
+}
+
+.calendario-dia:hover {
+    background-color: #f8f9fa;
+}
+
+.calendario-dia.vacio {
+    background-color: #f8f9fa;
+    border-color: #e9ecef;
+}
+
+.calendario-dia-numero {
+    font-weight: 600;
+    color: #495057;
+    margin-bottom: 5px;
+    font-size: 0.9em;
+}
+
+.calendario-evento {
+    background-color: #d4edda;
+    border-left: 3px solid #28a745;
+    padding: 4px 6px;
+    margin: 3px 0;
+    border-radius: 3px;
+    font-size: 0.75em;
+    line-height: 1.3;
+    color: #155724;
+    word-wrap: break-word;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.calendario-evento:hover {
+    background-color: #c3e6cb;
+}
+
+.calendario-dia.feriado {
+    background-color: #fdecea;
+    border-color: #f1a9a0;
+}
+
+.calendario-feriado-etiqueta {
+    font-size: 0.7em;
+    color: #a71d2a;
+    font-weight: 600;
+    margin-top: 2px;
+    word-wrap: break-word;
+}
+
+.licencias-lista {
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    padding: 20px;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.licencias-lista h4 {
+    margin-top: 0;
+    color: #495057;
+    border-bottom: 2px solid #dee2e6;
+    padding-bottom: 10px;
+    margin-bottom: 15px;
+}
+
+.licencia-item {
+    background-color: white;
+    padding: 12px;
+    margin-bottom: 10px;
+    border-radius: 5px;
+    border-left: 4px solid #28a745;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.licencia-item strong {
+    color: #333;
+}
+
+.licencia-item p {
+    margin: 5px 0;
+    font-size: 0.9em;
+    color: #6c757d;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .calendario-grid {
+        gap: 4px;
+    }
+    
+    .calendario-dia {
+        min-height: 60px;
+        padding: 4px;
+    }
+    
+    .calendario-evento {
+        font-size: 0.65em;
+        padding: 2px 4px;
+    }
+}

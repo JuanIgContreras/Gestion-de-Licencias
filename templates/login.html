@@ -11,6 +11,7 @@
         <img src="{{ url_for('static', filename='images/logo-hcdc.png') }}" alt="Logo Gestor de Vacaciones" style="max-width: 300px; margin-bottom: 20px;">
         <p>Por favor, inicia sesión para continuar</p>
         <form action="" method="POST">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="input-group">
                 <label for="username">Usuario</label>
                 <input type="text" id="username" name="username" required>
@@ -21,6 +22,12 @@
             </div>
             <button type="submit" class="btn">Ingresar</button>
         </form>
+
+        <!-- INICIO: Enlace de Olvidaste Contraseña -->
+        <div class="forgot-password-container">
+            <a href="#" id="forgotPasswordLink">¿Olvidaste tu contraseña?</a>
+        </div>
+        <!-- FIN: Enlace de Olvidaste Contraseña -->
     </div>
 
     <div class="flash-container">
@@ -37,5 +44,3 @@
 
 </div>
 {% endblock %}
-
-{% block scripts %}{% endblock %}
