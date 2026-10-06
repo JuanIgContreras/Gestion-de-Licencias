@@ -72,13 +72,25 @@ header div { display: flex; align-items: center; }
 .main-content { padding: 30px; }
 .summary-panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; }
 .panel { background-color: #fff; padding: 10px; border-radius: 8px; box-shadow: 0 2px 2px rgba(0,0,0,0.05); text-align: center; }
-.panel h3 { margin-top: 0; color: #6c757d; font-size: 11px; line-height: 1.3; }
-.panel .count { font-size: 1.6em; font-weight: 700; color: #007bff; }
+.panel h3 { margin-top: 0; color: #6c757d; font-size: 1em; line-height: 1.3; }
+.panel .count { font-size: 2.5em; font-weight: 700; color: #007bff; }
 .panel.approved .count { color: #28a745; }
 .panel.pending .count { color: #ffc107; }
 .panel.rejected .count { color: #dc3545; }
 
 .requests-table { width: 100%; border-collapse: collapse; margin-top: 20px; background-color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-radius: 8px; overflow: hidden; }
+
+.filter-input {
+    width: 100%;
+    padding: 10px 14px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    box-sizing: border-box;
+    font-family: 'Poppins', sans-serif;
+    font-size: 0.95em;
+    margin-top: 10px;
+}
+.filter-input:focus { outline: none; border-color: #007bff; box-shadow: 0 0 0 3px rgba(0,123,255,0.15); }
 .requests-table th, .requests-table td { padding: 15px; text-align: center; border-bottom: 1px solid #dee2e6; vertical-align: middle; }
 .requests-table thead th { background-color: #f8f9fa; font-weight: 600; color: #495057; }
 .requests-table tbody tr:hover { background-color: #f1f1f1; }
@@ -120,6 +132,12 @@ header div { display: flex; align-items: center; }
     color: #856404;
     font-size: 0.85em;
     font-weight: 500;
+}
+
+.saldo-vencido-nota {
+    color: #721c24;
+    font-size: 0.85em;
+    font-weight: 600;
 }
 
 
@@ -178,6 +196,39 @@ header div { display: flex; align-items: center; }
 .form-group { margin-bottom: 15px; }
 .form-group label { display: block; margin-bottom: 5px; font-weight: 500; }
 .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+
+/* Editor de texto enriquecido (mensajes de Novedades) */
+.rich-toolbar {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+.rich-btn {
+    background-color: #f8f9fa;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    width: 34px;
+    height: 32px;
+    font-size: 0.95em;
+    cursor: pointer;
+    color: #333;
+}
+.rich-btn:hover { background-color: #e9ecef; }
+.rich-editor {
+    width: 100%;
+    min-height: 100px;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box;
+    font-family: 'Poppins', sans-serif;
+    font-size: 1em;
+    line-height: 1.5;
+    overflow-y: auto;
+}
+.rich-editor:focus { outline: none; border-color: #007bff; box-shadow: 0 0 0 3px rgba(0,123,255,0.15); }
+.rich-editor-error { border-color: #dc3545; }
+.rich-editor ul { margin: 0; padding-left: 20px; }
 .submit-btn { background-color: #28a745; color: white; padding: 12px 20px; border: none; border-radius: 5px; cursor: pointer; font-size: 1em; width: 100%; }
 .submit-btn:hover { background-color: #218838; }
 .dashboard-layout { display: grid; grid-template-columns: 2fr 1fr; gap: 30px; margin-top: 30px; }
@@ -384,7 +435,7 @@ body:not(.login-page) .alert-success, body:not(.login-page) .alert-info, body:no
 /* Etiqueta debajo de la barra */
 .progress-label {
     margin-top: 5px;
-    font-size: 11px;
+    font-size: 0.85em;
     color: #6c757d;
     font-weight: 500;
 }
@@ -397,7 +448,7 @@ body:not(.login-page) .alert-success, body:not(.login-page) .alert-info, body:no
     }
 
     .progress-label {
-        font-size: 11px;
+        font-size: 0.85em;
     }
 }
 
@@ -450,6 +501,20 @@ body:not(.login-page) .alert-success, body:not(.login-page) .alert-info, body:no
     border-radius: 10px;
     box-shadow: 0 2px 6px rgba(0,0,0,0.08);
 }
+
+/* Próximos feriados (modal) */
+.proximos-feriados-lista {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.proximos-feriados-lista li {
+    padding: 8px 0;
+    border-bottom: 1px solid #eee;
+    font-size: 0.95em;
+    color: #495057;
+}
+.proximos-feriados-lista li:last-child { border-bottom: none; }
 
 /* Responsivo */
 @media (max-width: 992px) {
@@ -640,4 +705,32 @@ h2 .badge-pendientes {
         font-size: 0.65em;
         padding: 2px 4px;
     }
+}
+
+/* =================================
+   REPORTE DE SALDOS
+   ================================= */
+.reporte-generado {
+    color: #6c757d;
+    font-size: 0.9em;
+    margin-top: 0;
+}
+.reporte-tabla th, .reporte-tabla td { text-align: center; }
+.reporte-na { color: #adb5bd; }
+.reporte-vencida { background-color: #fff3e0; }
+.reporte-vencida-tag { color: #e67700; font-size: 0.8em; }
+.reporte-vencida-nota { color: #e67700; font-weight: 600; }
+
+/* Este título solo se ve al imprimir: reemplaza al header, que se oculta */
+.reporte-titulo-impresion { display: none; }
+
+@media print {
+    @page { size: A4 landscape; margin: 10mm; }
+    .no-imprimir { display: none !important; }
+    body { background: #fff; }
+    .main-content { padding: 0; }
+    .reporte-titulo-impresion { display: block; margin-bottom: 6px; font-size: 1.1em; }
+    .reporte-tabla { box-shadow: none; border: 1px solid #dee2e6; font-size: 0.78em; }
+    .reporte-tabla th, .reporte-tabla td { padding: 4px 8px; }
+    .reporte-tabla thead th { background-color: #f1f1f1 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }

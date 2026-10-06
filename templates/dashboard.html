@@ -19,6 +19,9 @@
     <header>
         <h1>Hola, {{ agente.nombre_completo }}</h1>
         <div>
+            {% if proximos_feriados %}
+            <button type="button" id="openProximosFeriadosBtn" class="header-btn">📅 Próximos Feriados</button>
+            {% endif %}
             <div class="dropdown-container">
 
                 <button id="userMenuBtn" class="header-btn user-menu-btn">
@@ -29,6 +32,7 @@
                     <a href="#" id="openModalBtn" class="dropdown-item">+ Solicitar Nueva Licencia</a>
                     <a href="#" id="openCalendarioBtn" class="dropdown-item">📅 Ver Calendario</a>
                     <a href="{{ url_for('mi_perfil') }}" class="dropdown-item">Mis Datos</a>
+                    <a href="{{ url_for('exportar_mi_historial') }}" class="dropdown-item">⬇️ Descargar mi historial</a>
                     {% if agente.es_admin %}
                         <a href="{{ url_for('panel_admin') }}" class="dropdown-item admin-alert">
         Panel de Admin
@@ -65,6 +69,7 @@
                 <p class="progress-label">
                     {{ saldo.disponibles }} de {{ saldo.asignados }} días disponibles
                     {% if saldo.pendientes > 0 %}<br><span class="saldo-pendiente-nota">({{ saldo.pendientes }} reservado{{ 's' if saldo.pendientes != 1 else '' }} en solicitudes pendientes)</span>{% endif %}
+                    {% if saldo.vencida %}<br><span class="saldo-vencido-nota">Plazo vencido el {{ saldo.fecha_limite.strftime('%d/%m/%Y') }}</span>{% endif %}
                 </p>
             </div>
             {% endfor %}
@@ -79,7 +84,13 @@
 <div class="dashboard-layout grid-permisos">
     <!-- === MIS SOLICITUDES === -->
     <div class="solicitudes-section panel-equal">
-        <h2>Mis Solicitudes</h2>
+        <div class="section-header">
+            <h2>Mis Solicitudes {% if notificaciones_nuevas > 0 %}<span class="badge-pendientes">{{ notificaciones_nuevas }} novedad{{ 'es' if notificaciones_nuevas != 1 }}</span>{% endif %}</h2>
+            <button class="toggle-btn" type="button" aria-label="Mostrar u ocultar mis solicitudes">
+                <svg class="chevron-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+            </button>
+        </div>
+        <div class="section-content">
         <table class="requests-table">
             <thead>
                 <tr>
@@ -160,6 +171,7 @@
 </tbody>
 
         </table>
+        </div>
     </div>
 
     <!-- === NOVEDADES === -->
@@ -168,7 +180,7 @@
         {% for novedad in novedades %}
             <div class="novedad-item">
                 <h4>{{ novedad.titulo }}</h4>
-                <p>{{ novedad.mensaje }}</p>
+                <p>{{ novedad.mensaje | safe }}</p>
             </div>
         {% else %}
             <p>No hay novedades publicadas.</p>
@@ -186,9 +198,8 @@
 
     <div class="info-banner">
         ⏰ <strong>Regla de antelación:</strong> toda solicitud debe cargarse a más tardar el
-        <strong>último día hábil previo hasta las 20:30hs</strong> (ej: para ausentarte un lunes, el corte es el
-        viernes anterior a las 20:30hs). Los días se cuentan hábiles administrativos (no se cuentan sábados,
-        domingos ni feriados). Para una ausencia excepcional o del mismo día, comunicate por teléfono con RRHH.
+        <strong>último día hábil previo hasta las 20:00hs</strong> (ej: para ausentarte un lunes, el corte es el
+        viernes anterior a las 20:00hs). Para una ausencia excepcional o del mismo día, comunicate por teléfono con RRHH.
     </div>
 
     <form id="licenciaForm" action="{{ url_for('nueva_solicitud') }}" method="POST">
@@ -277,7 +288,7 @@
       <div class="form-group">
         <label for="edit_tipo_licencia">Tipo de Licencia</label>
         <select id="edit_tipo_licencia" name="tipo_licencia" required>
-          {% for codigo, meta in categorias.items() %}
+          {% for codigo, meta in categorias_todas.items() %}
           <option value="{{ codigo }}">{{ meta.label }}</option>
           {% endfor %}
         </select>
@@ -303,6 +314,21 @@
         <button type="submit" class="submit-btn">Guardar Cambios</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- MODAL PRÓXIMOS FERIADOS -->
+<div id="proximosFeriadosModal" class="modal">
+  <div class="modal-content">
+    <span class="close-btn" id="closeProximosFeriadosBtn">&times;</span>
+    <h2>Próximos Feriados</h2>
+    <ul class="proximos-feriados-lista">
+        {% for f in proximos_feriados %}
+        <li><strong>{{ f.fecha.strftime('%d/%m/%Y') }}</strong> — {{ f.descripcion }}</li>
+        {% else %}
+        <li>No hay feriados próximos cargados.</li>
+        {% endfor %}
+    </ul>
   </div>
 </div>
 

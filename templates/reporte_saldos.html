@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Reporte de Agentes{% endblock %}
+
+{% block content %}
+<header class="no-imprimir">
+    <h1>Reporte de Agentes</h1>
+    <div>
+        <a href="{{ url_for('panel_admin') }}" class="header-btn">Volver al Panel de Admin</a>
+        <a href="{{ url_for('exportar_reporte_saldos') }}" class="header-btn">⬇️ Exportar a Excel</a>
+        <button type="button" class="header-btn" onclick="window.print()">🖨️ Imprimir</button>
+        <a href="{{ url_for('logout') }}" class="header-btn logout">Cerrar Sesión</a>
+    </div>
+</header>
+
+<main class="main-content">
+    <p class="reporte-generado no-imprimir">
+        Generado el {{ generado_en.strftime('%d/%m/%Y %H:%M') }}hs — se actualiza solo con volver a entrar a esta página.
+        Las categorías marcadas <span class="reporte-vencida-nota">en naranja</span> ya vencieron: el agente las ve
+        en 0, pero acá se muestra el disponible real para decidir si corresponde una prórroga.
+    </p>
+    <h2 class="reporte-titulo-impresion">Reporte de Agentes — {{ generado_en.strftime('%d/%m/%Y %H:%M') }}hs</h2>
+
+    <table class="requests-table reporte-tabla">
+        <thead>
+            <tr>
+                <th style="text-align: left;">Agente</th>
+                <th>Última Conexión</th>
+                {% for codigo, meta in categorias.items() %}
+                <th>{{ meta.label }}</th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for fila in filas %}
+            <tr>
+                <td style="text-align: left;">{{ fila.agente.nombre_completo }}</td>
+                <td>
+                    {% if fila.agente.ultimo_login %}
+                        {{ fila.agente.ultimo_login.strftime('%d/%m/%Y %H:%M') }}hs
+                    {% else %}
+                        <span class="reporte-na">Nunca</span>
+                    {% endif %}
+                </td>
+                {% for codigo, meta in categorias.items() %}
+                {% set c = fila.categorias[codigo] %}
+                <td{% if c.habilitada and c.vencida %} class="reporte-vencida"{% endif %}>
+                    {% if c.habilitada %}
+                        {{ c.disponibles }} de {{ c.asignados }}{% if c.vencida %} <span class="reporte-vencida-tag">(vencida)</span>{% endif %}
+                    {% else %}
+                        <span class="reporte-na">—</span>
+                    {% endif %}
+                </td>
+                {% endfor %}
+            </tr>
+            {% else %}
+            <tr><td colspan="{{ categorias|length + 2 }}">No hay agentes registrados.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</main>
+{% endblock %}

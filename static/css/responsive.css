@@ -8,7 +8,7 @@
     .header-btn { width: 100%; text-align: center; margin-left: 0; }
     
     .main-content { padding: 15px; }
-    .panel .count { font-size: 1.4em; }
+    .panel .count { font-size: 2em; }
 
     /* Paneles y secciones a una sola columna */
     .summary-panels { grid-template-columns: 1fr; }

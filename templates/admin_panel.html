@@ -8,6 +8,7 @@
     <div>
         <a href="{{ url_for('dashboard') }}" class="header-btn">Volver al Dashboard</a>
         <a href="#" id="openCalendarioBtn" class="header-btn">📅 Calendario</a>
+        <a href="{{ url_for('reporte_saldos') }}" class="header-btn">📊 Reporte de Agentes</a>
         <a href="{{ url_for('logout') }}" class="header-btn logout">Cerrar Sesión</a>
     </div>
 </header>
@@ -36,7 +37,9 @@
         <div class="section-content">
             <button id="openCreateAgentModalBtn" class="submit-btn" style="width: auto; margin-bottom: 20px; background-color: #007bff;">+ Crear Nuevo Agente</button>
 
-            <table class="requests-table">
+            <input type="text" class="filter-input" data-filter-target="#agentesTable" placeholder="🔎 Buscar por nombre o usuario...">
+
+            <table class="requests-table" id="agentesTable">
                 <thead>
                     <tr>
                         <th style="text-align: left;">Nombre Completo</th>
@@ -48,7 +51,7 @@
                 <tbody>
                     {% for agente in agentes %}
                     {% set saldos_ag = saldos_por_agente.get(agente.id, {}) %}
-                    <tr id="agente-row-{{ agente.id }}">
+                    <tr id="agente-row-{{ agente.id }}" data-filter-row>
                         <td style="text-align: left;">{{ agente.nombre_completo }}</td>
                         <td style="text-align: left;">{{ agente.usuario }}</td>
                         <td>
@@ -100,6 +103,8 @@
                 <button id="openCerrarEjercicioBtn" class="submit-btn" style="width: auto; background-color: #6c757d;">Cerrar Ejercicio (31/12)</button>
             </div>
 
+            <input type="text" class="filter-input" data-filter-target=".licencias-tabla" placeholder="🔎 Buscar por agente o tipo de licencia...">
+
             <div class="tabs">
                 <button class="tab-button active" data-tab="pendientes">Pendientes ({{ pendientes|length }})</button>
                 <button class="tab-button" data-tab="aprobadas">Aprobadas</button>
@@ -107,7 +112,7 @@
             </div>
 
             <div id="pendientes" class="tab-content active">
-                <table class="requests-table">
+                <table class="requests-table licencias-tabla">
                     <thead>
                         <tr>
                             <th style="text-align: left;">Agente</th>
@@ -120,7 +125,7 @@
                     </thead>
                     <tbody>
                         {% for s in pendientes %}
-                        <tr>
+                        <tr data-filter-row>
                             <td style="text-align: left;">{{ s.agente.nombre_completo }}</td>
                             <td style="text-align: left;">{{ categorias.get(s.tipo_licencia, {}).get('label', s.tipo_licencia) }}</td>
                             <td>{{ s.fecha_inicio.strftime('%d/%m/%Y') }}</td>
@@ -131,12 +136,17 @@
                                         data-id="{{ s.id }}"
                                         data-agente="{{ s.agente.nombre_completo }}"
                                         data-tipo="{{ categorias.get(s.tipo_licencia, {}).get('label', s.tipo_licencia) }}"
+                                        data-categoria="{{ s.tipo_licencia }}"
                                         data-fecha="{{ s.fecha_inicio.strftime('%d/%m/%Y') }}"
                                         data-fecha-fin="{{ s.fecha_fin.strftime('%d/%m/%Y') if s.fecha_fin else '-' }}"
                                         data-dias="{{ s.dias_solicitados }}"
                                         data-comentario="{{ s.comentario_agente or 'N/A' }}">
                                     Gestionar
                                 </button>
+                                <form class="delete-solicitud-form" action="{{ url_for('admin_eliminar_solicitud', id_solicitud=s.id) }}" method="POST">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button type="submit" class="action-btn reject">Eliminar</button>
+                                </form>
                             </td>
                         </tr>
                         {% else %}
@@ -147,7 +157,7 @@
             </div>
 
             <div id="aprobadas" class="tab-content">
-                <table class="requests-table">
+                <table class="requests-table licencias-tabla">
                      <thead>
                            <tr>
         <th style="text-align: left;">Agente</th>
@@ -160,7 +170,7 @@
                     </thead>
                     <tbody>
                         {% for s in aprobadas %}
-                        <tr>
+                        <tr data-filter-row>
                              <td style="text-align: left">{{ s.agente.nombre_completo }}</td>
                              <td style="text-align: left">{{ categorias.get(s.tipo_licencia, {}).get('label', s.tipo_licencia) }}{% if s.es_oficio %} <span class="status-badge oficio">Oficio</span>{% endif %}</td>
                              <td>{{ s.fecha_inicio.strftime('%d/%m/%Y') }}</td>
@@ -181,7 +191,7 @@
             </div>
 
             <div id="rechazadas" class="tab-content">
-                 <table class="requests-table">
+                 <table class="requests-table licencias-tabla">
                      <thead>
                         <tr>
                             <th style="text-align: left;">Agente</th>
@@ -194,7 +204,7 @@
                     </thead>
                     <tbody>
                         {% for s in rechazadas %}
-                        <tr>
+                        <tr data-filter-row>
                              <td style="text-align: left">{{ s.agente.nombre_completo }}</td>
                              <td style="text-align: left">{{ categorias.get(s.tipo_licencia, {}).get('label', s.tipo_licencia) }}</td>
                              <td>{{ s.fecha_inicio.strftime('%d/%m/%Y') }}</td>
@@ -245,6 +255,9 @@
                         <td style="text-align: left;">{{ f.descripcion }}</td>
                         <td>{{ f.tipo }}</td>
                         <td class="actions-cell">
+                            <button type="button" class="action-btn edit edit-feriado-btn"
+                                data-id="{{ f.id }}" data-fecha="{{ f.fecha.strftime('%Y-%m-%d') }}"
+                                data-descripcion="{{ f.descripcion }}" data-tipo="{{ f.tipo }}">Editar</button>
                             <form action="{{ url_for('eliminar_feriado', id_feriado=f.id) }}" method="POST">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <button type="submit" class="action-btn reject">Eliminar</button>
@@ -297,6 +310,37 @@
                     {% endfor %}
                 </tbody>
             </table>
+        </div>
+    </div>
+
+    <!-- SECCIÓN: PLAZOS DE VIGENCIA POR CATEGORÍA -->
+    <div class="section-panel">
+        <div class="section-header">
+            <h2>Plazos de Vigencia por Categoría</h2>
+            <button class="toggle-btn">
+                <svg class="chevron-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+            </button>
+        </div>
+        <div class="section-content">
+            <p style="color:#6c757d; margin-top:0;">
+                Pasado el plazo, los agentes ya no pueden solicitar (ni editar hacia) esa categoría y sus días
+                disponibles se muestran en 0 — sin borrar nada. Para una prórroga, alcanza con mover la fecha.
+                Dejá el campo vacío para que la categoría no tenga vencimiento. Vos seguís pudiendo cargar de
+                oficio en cualquier categoría aunque esté vencida.
+            </p>
+            <form action="{{ url_for('guardar_limites') }}" method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="form-group" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                    {% for codigo, meta in categorias.items() %}
+                    <div>
+                        <label for="limite-{{ codigo }}">{{ meta.label }}</label>
+                        <input type="date" id="limite-{{ codigo }}" name="limite_{{ codigo }}"
+                               value="{{ limites[codigo].strftime('%Y-%m-%d') if limites.get(codigo) else '' }}">
+                    </div>
+                    {% endfor %}
+                </div>
+                <button type="submit" class="submit-btn" style="width: auto; margin-top: 15px;">Guardar Plazos</button>
+            </form>
         </div>
     </div>
 
@@ -362,19 +406,19 @@
             <hr>
             <div class="form-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
                 <div>
-                    <label for="create-lao">Cupo LAO</label>
+                    <label for="create-lao">Cupo {{ categorias.LAO.label }}</label>
                     <input type="number" id="create-lao" name="cupo_LAO" value="{{ categorias.LAO.cupo_default }}" required>
                 </div>
                 <div>
-                    <label for="create-invierno">Cupo Invierno</label>
+                    <label for="create-invierno">Cupo {{ categorias.INVIERNO.label }}</label>
                     <input type="number" id="create-invierno" name="cupo_INVIERNO" value="{{ categorias.INVIERNO.cupo_default }}" required>
                 </div>
                 <div>
-                    <label for="create-comp">Cupo Compensatorios</label>
+                    <label for="create-comp">Cupo {{ categorias.COMPENSATORIO.label }}</label>
                     <input type="number" id="create-comp" name="cupo_COMPENSATORIO" value="{{ categorias.COMPENSATORIO.cupo_default }}" required>
                 </div>
                 <div>
-                    <label for="create-examen">Cupo Examen/Estudio</label>
+                    <label for="create-examen">Cupo {{ categorias.EXAMEN_ESTUDIO.label }}</label>
                     <input type="number" id="create-examen" name="cupo_EXAMEN_ESTUDIO" value="{{ categorias.EXAMEN_ESTUDIO.cupo_default }}" required>
                 </div>
             </div>
@@ -382,7 +426,7 @@
             <div class="form-group">
                 <label class="checkbox-label">
                     <input type="checkbox" name="examen_estudio_habilitado">
-                    Habilitar categoría Examen/Estudio para este agente
+                    Habilitar categoría {{ categorias.EXAMEN_ESTUDIO.label }} para este agente
                 </label>
             </div>
             <div class="form-group">
@@ -414,19 +458,19 @@
             <hr>
             <div class="form-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
                 <div>
-                    <label for="edit-lao">Cupo LAO</label>
+                    <label for="edit-lao">Cupo {{ categorias.LAO.label }}</label>
                     <input type="number" id="edit-lao" name="cupo_LAO" required>
                 </div>
                 <div>
-                    <label for="edit-invierno">Cupo Invierno</label>
+                    <label for="edit-invierno">Cupo {{ categorias.INVIERNO.label }}</label>
                     <input type="number" id="edit-invierno" name="cupo_INVIERNO" required>
                 </div>
                 <div>
-                    <label for="edit-comp">Cupo Compensatorios</label>
+                    <label for="edit-comp">Cupo {{ categorias.COMPENSATORIO.label }}</label>
                     <input type="number" id="edit-comp" name="cupo_COMPENSATORIO" required>
                 </div>
                 <div>
-                    <label for="edit-examen">Cupo Examen/Estudio</label>
+                    <label for="edit-examen">Cupo {{ categorias.EXAMEN_ESTUDIO.label }}</label>
                     <input type="number" id="edit-examen" name="cupo_EXAMEN_ESTUDIO" required>
                 </div>
             </div>
@@ -438,7 +482,7 @@
             <div class="form-group">
                 <label class="checkbox-label">
                     <input type="checkbox" id="edit-examen-habilitado" name="examen_estudio_habilitado">
-                    Habilitar categoría Examen/Estudio para este agente
+                    Habilitar categoría {{ categorias.EXAMEN_ESTUDIO.label }} para este agente
                 </label>
             </div>
             <div class="form-group">
@@ -469,6 +513,17 @@
         <div class="admin-actions">
             <h4>Comentario de RRHH (Opcional)</h4>
             <textarea id="comentario_admin_text" rows="3" placeholder="Ej: Aprobado, pero coordinar con tu equipo."></textarea>
+
+            <div class="form-group" style="margin-top: 15px;">
+                <label for="detail-categoria-select">Categoría de licencia</label>
+                <select id="detail-categoria-select">
+                    {% for codigo, meta in categorias.items() %}
+                    <option value="{{ codigo }}">{{ meta.label }}</option>
+                    {% endfor %}
+                </select>
+                <small style="color:#6c757d;">Si corresponde, podés reclasificarla a otra categoría antes de aprobar (ej: pidieron {{ categorias.LAO.label }} pero corresponde {{ categorias.INVIERNO.label }}).</small>
+            </div>
+
             <div class="action-buttons-container">
                 <form id="reject-form" method="POST" style="display: inline;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -478,6 +533,7 @@
                 <form id="approve-form" method="POST" style="display: inline;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="comentario_admin">
+                    <input type="hidden" name="categoria" id="approve-categoria-input">
                     <button type="submit" class="action-btn approve">Aprobar</button>
                 </form>
             </div>
@@ -493,7 +549,17 @@
         <form action="{{ url_for('publicar_novedad') }}" method="POST">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="form-group"><label for="titulo">Título</label><input type="text" name="titulo" required></div>
-            <div class="form-group"><label for="mensaje">Mensaje</label><textarea name="mensaje" rows="4" required></textarea></div>
+            <div class="form-group">
+                <label for="mensaje-editor">Mensaje</label>
+                <div class="rich-toolbar" data-target="mensaje-editor">
+                    <button type="button" class="rich-btn" data-command="bold" title="Negrita"><b>N</b></button>
+                    <button type="button" class="rich-btn" data-command="italic" title="Cursiva"><i>K</i></button>
+                    <button type="button" class="rich-btn" data-command="underline" title="Subrayado"><u>S</u></button>
+                    <button type="button" class="rich-btn" data-command="insertUnorderedList" title="Lista con viñetas">&#8226; Lista</button>
+                </div>
+                <div id="mensaje-editor" class="rich-editor" data-textarea="mensaje" contenteditable="true"></div>
+                <textarea name="mensaje" id="mensaje" style="display:none;"></textarea>
+            </div>
             <button type="submit" class="submit-btn">Publicar</button>
         </form>
     </div>
@@ -584,6 +650,37 @@
   </div>
 </div>
 
+<!-- Modal para Editar Feriado -->
+<div id="editFeriadoModal" class="modal">
+  <div class="modal-content">
+    <span class="close-btn" id="closeEditFeriadoModalBtn">&times;</span>
+    <h2>Editar Feriado</h2>
+    <p style="color:#6c757d;">Si cambiás la fecha y la nueva cae dentro de una licencia ya aprobada, esa solicitud
+        se recalcula automáticamente. La fecha anterior no se recalcula al revés.</p>
+    <form id="editFeriadoForm" method="POST">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="form-group">
+        <label for="edit-feriado-fecha">Fecha</label>
+        <input type="date" id="edit-feriado-fecha" name="fecha" required>
+      </div>
+      <div class="form-group">
+        <label for="edit-feriado-descripcion">Descripción</label>
+        <input type="text" id="edit-feriado-descripcion" name="descripcion" required>
+      </div>
+      <div class="form-group">
+        <label for="edit-feriado-tipo">Tipo</label>
+        <select id="edit-feriado-tipo" name="tipo">
+          <option value="Nacional">Nacional</option>
+          <option value="Provincial">Provincial</option>
+          <option value="Municipal">Municipal</option>
+          <option value="Asueto">Asueto</option>
+        </select>
+      </div>
+      <button type="submit" class="submit-btn">Guardar Cambios</button>
+    </form>
+  </div>
+</div>
+
 <!-- Modal para Importar Feriados -->
 <div id="importarFeriadosModal" class="modal">
   <div class="modal-content">
@@ -634,7 +731,17 @@
         <form id="editNovedadForm" method="POST">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="form-group"><label for="edit-titulo">Título</label><input type="text" id="edit-titulo" name="titulo" required></div>
-            <div class="form-group"><label for="edit-mensaje">Mensaje</label><textarea id="edit-mensaje" name="mensaje" rows="4" required></textarea></div>
+            <div class="form-group">
+                <label for="edit-mensaje-editor">Mensaje</label>
+                <div class="rich-toolbar" data-target="edit-mensaje-editor">
+                    <button type="button" class="rich-btn" data-command="bold" title="Negrita"><b>N</b></button>
+                    <button type="button" class="rich-btn" data-command="italic" title="Cursiva"><i>K</i></button>
+                    <button type="button" class="rich-btn" data-command="underline" title="Subrayado"><u>S</u></button>
+                    <button type="button" class="rich-btn" data-command="insertUnorderedList" title="Lista con viñetas">&#8226; Lista</button>
+                </div>
+                <div id="edit-mensaje-editor" class="rich-editor" data-textarea="edit-mensaje" contenteditable="true"></div>
+                <textarea id="edit-mensaje" name="mensaje" style="display:none;"></textarea>
+            </div>
             <button type="submit" class="submit-btn">Guardar Cambios</button>
         </form>
     </div>
@@ -644,5 +751,28 @@
 <form id="cerrarEjercicioForm" action="{{ url_for('cerrar_ejercicio') }}" method="POST" style="display:none;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 </form>
+
+<!-- MODAL CALENDARIO DE LICENCIAS -->
+<div id="calendarioModal" class="modal">
+  <div class="modal-content" style="max-width: 900px;">
+    <span class="close-btn" id="closeCalendarioBtn">&times;</span>
+    <h2 style="text-align: center; margin-bottom: 10px;">Calendario de Licencias</h2>
+
+    <div class="calendario-header">
+      <button type="button" class="header-btn" id="mesAnteriorBtn">← Anterior</button>
+      <h3 id="mesActualTexto">Enero 2025</h3>
+      <button type="button" class="header-btn" id="mesSiguienteBtn">Siguiente →</button>
+    </div>
+
+    <div id="calendarioGrid" class="calendario-grid">
+      <!-- Se generará dinámicamente con JavaScript -->
+    </div>
+
+    <div id="licenciasLista" class="licencias-lista">
+      <h4>Licencias del mes:</h4>
+      <div id="licenciasContenido"></div>
+    </div>
+  </div>
+</div>
 
 {% endblock %}

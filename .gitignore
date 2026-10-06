@@ -5,6 +5,7 @@ venv/
 
 # Archivos de caché de Python
 __pycache__/
+.pytest_cache/
 
 # Base de datos
 # NUNCA subas el archivo de la base de datos a un repositorio público

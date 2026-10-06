@@ -1,14 +1,23 @@
 import os
+import io
 import shutil
 import secrets
 from calendar import monthrange
 from datetime import datetime, date, time, timedelta
-from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
-from flask_sqlalchemy import SQLAlchemy
-from flask_bcrypt import Bcrypt
-from flask_wtf import CSRFProtect
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file
 import pandas as pd
 import click
+
+from extensions import db, bcrypt, csrf
+from models import (
+    CATEGORIAS, Agente, SaldoLicencia, Feriado, PeriodoVeda, LimiteCategoria, Solicitud, Novedad,
+)
+from motor_licencias import (
+    CUTOFF_HORA, cargar_feriados, contar_dias_habiles, fecha_fin_para_n_dias_habiles,
+    calcular_cutoff, recalcular_por_nuevo_feriado, _obtener_o_crear_saldo,
+    _normalizar_categoria, _limite_categoria, _categoria_vencida, _crear_solicitud,
+    _sanitizar_mensaje,
+)
 
 # --- CONFIGURACIÓN INICIAL ---
 basedir = os.path.abspath(os.path.dirname(__file__))
@@ -30,281 +39,19 @@ else:
         f.write(_secret_key)
 
 app.config['SECRET_KEY'] = _secret_key
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'database.db')
+
+# La base de datos también se puede apuntar por variable de entorno —
+# principalmente para que los tests (ver tests/conftest.py) corran contra un
+# archivo temporal en vez de la base real. Sin DATABASE_URL, se usa
+# database.db en el directorio del proyecto, como siempre.
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
+    'DATABASE_URL', 'sqlite:///' + os.path.join(basedir, 'database.db')
+)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-db = SQLAlchemy(app)
-bcrypt = Bcrypt(app)
-csrf = CSRFProtect(app)
 
-# --- CATEGORÍAS DE LICENCIA ---
-# El sistema gestiona exclusivamente licencias por días completos, agrupadas
-# en estas 4 categorías fijas. "Permisos" (franquicias horarias) ya no existe.
-CATEGORIAS = {
-    'LAO':            {'label': 'Licencia Anual Ordinaria (LAO)', 'cupo_default': 22},
-    'INVIERNO':       {'label': 'Licencia de Invierno (Feria)',   'cupo_default': 10},
-    'COMPENSATORIO':  {'label': 'Compensatorios',                 'cupo_default': 0},
-    'EXAMEN_ESTUDIO': {'label': 'Examen / Estudio',               'cupo_default': 20},
-}
-CUTOFF_HORA = time(20, 30)
-
-# --- MODELOS DE LA BASE DE DATOS ---
-class Agente(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    usuario = db.Column(db.String(80), unique=True, nullable=False)
-    clave_hash = db.Column(db.String(120), nullable=False)
-    nombre_completo = db.Column(db.String(200), nullable=False)
-    es_admin = db.Column(db.Boolean, default=False, nullable=False)
-    esta_activo = db.Column(db.Boolean, default=True, nullable=False)
-    # Examen/Estudio es la única categoría que no está disponible para todos:
-    # el admin tiene que habilitarla agente por agente.
-    examen_estudio_habilitado = db.Column(db.Boolean, default=False, nullable=False)
-    solicitudes = db.relationship('Solicitud', backref='agente', lazy=True, cascade="all, delete-orphan")
-
-    def __repr__(self):
-        return f'<Agente {self.usuario}>'
-
-
-class SaldoLicencia(db.Model):
-    """Saldo de una categoría de licencia para un agente.
-
-    Reemplaza a las columnas fijas dias_enero/dias_julio/dias_compensatorios_*
-    que tenía Agente: una fila por agente+categoría, con la mecánica
-    disponibles = asignados - (usados + pendientes).
-    """
-    id_agente = db.Column(db.Integer, db.ForeignKey('agente.id', ondelete='CASCADE'), primary_key=True)
-    categoria = db.Column(db.String(20), primary_key=True)
-    dias_asignados = db.Column(db.Integer, nullable=False, default=0)
-    dias_usados = db.Column(db.Integer, nullable=False, default=0)
-    dias_pendientes = db.Column(db.Integer, nullable=False, default=0)
-
-    agente = db.relationship('Agente', backref=db.backref('saldos', cascade='all, delete-orphan'))
-
-    @property
-    def dias_disponibles(self):
-        return self.dias_asignados - (self.dias_usados + self.dias_pendientes)
-
-    def __repr__(self):
-        return f'<SaldoLicencia agente={self.id_agente} {self.categoria}>'
-
-
-class Feriado(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    fecha = db.Column(db.Date, unique=True, nullable=False)
-    descripcion = db.Column(db.String(150), nullable=False)
-    tipo = db.Column(db.String(20), default='Nacional')  # Nacional / Provincial / Municipal / Asueto
-
-    def __repr__(self):
-        return f'<Feriado {self.fecha} {self.descripcion}>'
-
-
-class PeriodoVeda(db.Model):
-    """Rango de fechas donde los agentes no pueden cargar solicitudes propias
-    (ej. liquidación de sueldos). Solo el admin puede registrar de oficio."""
-    id = db.Column(db.Integer, primary_key=True)
-    fecha_inicio = db.Column(db.Date, nullable=False)
-    fecha_fin = db.Column(db.Date, nullable=False)
-    motivo = db.Column(db.String(200), nullable=False)
-
-    def __repr__(self):
-        return f'<PeriodoVeda {self.fecha_inicio} - {self.fecha_fin}>'
-
-
-class Solicitud(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    tipo_licencia = db.Column(db.String(50), nullable=False)  # código de CATEGORIAS
-    fecha_inicio = db.Column(db.Date, nullable=False)
-    fecha_fin = db.Column(db.Date, nullable=True)
-    dias_solicitados = db.Column(db.Integer, nullable=False)  # días hábiles del rango
-    estado = db.Column(db.String(20), nullable=False, default='Pendiente')
-    comentario_agente = db.Column(db.Text, nullable=True)
-    comentario_admin = db.Column(db.Text, nullable=True)
-    id_agente = db.Column(db.Integer, db.ForeignKey('agente.id', ondelete='CASCADE'), nullable=False)
-    # Carga de oficio: válvula de escape del admin para cargar fuera de término
-    es_oficio = db.Column(db.Boolean, default=False, nullable=False)
-    constancia_aviso = db.Column(db.Text, nullable=True)
-    creado_en = db.Column(db.DateTime, nullable=True)
-
-    def __repr__(self):
-        return f'<Solicitud {self.id} - {self.tipo_licencia}>'
-
-
-class Novedad(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    titulo = db.Column(db.String(100), nullable=False)
-    mensaje = db.Column(db.Text, nullable=False)
-    fecha_publicacion = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-
-    def __repr__(self):
-        return f'<Novedad {self.titulo}>'
-
-
-# --- MOTOR DE DÍAS HÁBILES ADMINISTRATIVOS ---
-def cargar_feriados() -> set:
-    """Devuelve el set de fechas feriado cargadas (nacionales, provinciales,
-    municipales y asuetos: todos se tratan igual a los fines del cómputo)."""
-    return {f.fecha for f in Feriado.query.all()}
-
-
-def es_dia_habil(fecha: date, feriados: set) -> bool:
-    return fecha.weekday() < 5 and fecha not in feriados
-
-
-def contar_dias_habiles(fecha_inicio: date, fecha_fin: date, feriados: set) -> int:
-    dias = 0
-    actual = fecha_inicio
-    while actual <= fecha_fin:
-        if es_dia_habil(actual, feriados):
-            dias += 1
-        actual += timedelta(days=1)
-    return dias
-
-
-def fecha_fin_para_n_dias_habiles(fecha_inicio: date, n: int, feriados: set) -> date:
-    """Dado un fecha_inicio y una cantidad objetivo de días hábiles, devuelve
-    la fecha en la que se completan. Usada para recalcular una licencia
-    cuando se declara un feriado retroactivo dentro de su rango."""
-    if n <= 0:
-        return fecha_inicio - timedelta(days=1)
-    contados = 0
-    actual = fecha_inicio
-    while True:
-        if es_dia_habil(actual, feriados):
-            contados += 1
-            if contados == n:
-                return actual
-        actual += timedelta(days=1)
-
-
-def dia_habil_anterior(fecha: date, feriados: set) -> date:
-    d = fecha - timedelta(days=1)
-    while not es_dia_habil(d, feriados):
-        d -= timedelta(days=1)
-    return d
-
-
-def calcular_cutoff(fecha_inicio: date, feriados: set) -> datetime:
-    """Corte de carga: 20:30hs del último día hábil administrativo previo a
-    fecha_inicio."""
-    return datetime.combine(dia_habil_anterior(fecha_inicio, feriados), CUTOFF_HORA)
-
-
-def recalcular_por_nuevo_feriado(fecha_feriado: date) -> list:
-    """Se llama justo después de agregar un Feriado nuevo. Busca Solicitud
-    Aprobada cuyo rango contenga esa fecha, resta 1 día hábil, recalcula
-    fecha_fin y devuelve 1 día al saldo del agente. Si el resultado quedaría
-    en 0 días hábiles, no se toca automáticamente: se marca para revisión
-    manual del admin (no se puede eliminar en silencio una licencia aprobada)."""
-    if fecha_feriado.weekday() >= 5:
-        return []
-
-    afectadas = Solicitud.query.filter(
-        Solicitud.estado == 'Aprobada',
-        Solicitud.fecha_inicio <= fecha_feriado,
-        Solicitud.fecha_fin >= fecha_feriado,
-    ).all()
-    if not afectadas:
-        return []
-
-    feriados = cargar_feriados()  # ya incluye el nuevo, se llama post-commit
-    resultado = []
-    for s in afectadas:
-        nuevos_dias = s.dias_solicitados - 1
-        # Normaliza categorías legadas ("Vacaciones Enero", etc.) para no
-        # acreditar el día devuelto a una categoría fantasma.
-        categoria = _normalizar_categoria(s.tipo_licencia)
-        if categoria:
-            s.tipo_licencia = categoria
-        saldo = _obtener_o_crear_saldo(s.id_agente, categoria or s.tipo_licencia)
-        if nuevos_dias <= 0:
-            s.comentario_admin = (s.comentario_admin or '') + \
-                f' [REVISAR: el feriado del {fecha_feriado.strftime("%d/%m/%Y")} deja esta licencia en 0 días hábiles]'
-        else:
-            s.dias_solicitados = nuevos_dias
-            s.fecha_fin = fecha_fin_para_n_dias_habiles(s.fecha_inicio, nuevos_dias, feriados)
-            saldo.dias_usados = max(0, saldo.dias_usados - 1)
-        resultado.append(s)
-
-    db.session.commit()
-    return resultado
-
-
-def _obtener_o_crear_saldo(id_agente: int, categoria: str) -> SaldoLicencia:
-    saldo = SaldoLicencia.query.filter_by(id_agente=id_agente, categoria=categoria).first()
-    if not saldo:
-        # <-- CORREGIDO: los default=0 de la columna solo se aplican recién al
-        # hacer flush/INSERT. Si no se inicializan acá, dias_usados/dias_pendientes
-        # quedan en None en el objeto Python y cualquier resta/suma posterior
-        # (ej. al rectificar una solicitud) tira TypeError antes de llegar a guardarse.
-        saldo = SaldoLicencia(id_agente=id_agente, categoria=categoria,
-                               dias_asignados=0, dias_usados=0, dias_pendientes=0)
-        db.session.add(saldo)
-    return saldo
-
-
-def _normalizar_categoria(tipo_licencia: str):
-    """Mapea texto legado del sistema anterior (ej. "Vacaciones Enero") al
-    código de categoría correspondiente. Si ya es un código válido lo
-    devuelve tal cual; si no se puede identificar, devuelve None."""
-    if tipo_licencia in CATEGORIAS:
-        return tipo_licencia
-    texto = (tipo_licencia or '').lower()
-    if 'enero' in texto:
-        return 'LAO'
-    if 'julio' in texto or 'invierno' in texto:
-        return 'INVIERNO'
-    if 'compensatorio' in texto:
-        return 'COMPENSATORIO'
-    if 'examen' in texto or 'estudio' in texto:
-        return 'EXAMEN_ESTUDIO'
-    return None
-
-
-def _crear_solicitud(agente, categoria, fecha_inicio, fecha_fin, comentario,
-                      es_oficio=False, constancia_aviso=None, comentario_admin=None):
-    """Valida y crea una Solicitud. Devuelve (solicitud, error) — si hay
-    error, solicitud es None y no se agregó nada a la sesión. No valida el
-    corte de las 20:30hs ni la veda administrativa: eso lo resuelve el caller
-    (nueva_solicitud lo valida siempre; la carga de oficio del admin lo
-    salta a propósito, es la válvula de escape)."""
-    if categoria not in CATEGORIAS:
-        return None, 'Categoría de licencia inválida.'
-    if categoria == 'EXAMEN_ESTUDIO' and not agente.examen_estudio_habilitado:
-        return None, 'No tenés habilitada la categoría Examen/Estudio.'
-    if fecha_fin < fecha_inicio:
-        return None, 'La fecha de fin no puede ser anterior a la fecha de inicio.'
-
-    feriados = cargar_feriados()
-    dias_habiles = contar_dias_habiles(fecha_inicio, fecha_fin, feriados)
-    if dias_habiles <= 0:
-        return None, 'El rango elegido no contiene días hábiles administrativos.'
-
-    saldo = _obtener_o_crear_saldo(agente.id, categoria)
-    if saldo.dias_disponibles < dias_habiles:
-        return None, (f'No tenés suficientes días disponibles en {CATEGORIAS[categoria]["label"]}. '
-                       f'Disponibles: {saldo.dias_disponibles}.')
-
-    estado = 'Aprobada' if es_oficio else 'Pendiente'
-    solicitud = Solicitud(
-        tipo_licencia=categoria,
-        fecha_inicio=fecha_inicio,
-        fecha_fin=fecha_fin,
-        dias_solicitados=dias_habiles,
-        comentario_agente=comentario,
-        comentario_admin=comentario_admin,
-        id_agente=agente.id,
-        estado=estado,
-        es_oficio=es_oficio,
-        constancia_aviso=constancia_aviso,
-        creado_en=datetime.now(),
-    )
-    db.session.add(solicitud)
-
-    if es_oficio:
-        saldo.dias_usados += dias_habiles
-    else:
-        saldo.dias_pendientes += dias_habiles
-
-    return solicitud, None
+db.init_app(app)
+bcrypt.init_app(app)
+csrf.init_app(app)
 
 
 # --- MIGRACIÓN DE ESQUEMA ---
@@ -322,10 +69,16 @@ def migrar_esquema():
         #    antes de un cambio destructivo, aunque no se pidió conservar
         #    los datos de permisos.
         if 'permiso' in tablas_actuales:
-            db_path = os.path.join(basedir, 'database.db')
-            if os.path.exists(db_path):
+            # <-- CORREGIDO: antes esto asumía que la base siempre está en
+            # basedir/database.db, ignorando DATABASE_URL (usada por los
+            # tests y por cualquier despliegue con otra ruta). Se toma la
+            # ruta real del archivo sqlite configurado.
+            db_uri = app.config['SQLALCHEMY_DATABASE_URI']
+            db_path = db_uri[len('sqlite:///'):] if db_uri.startswith('sqlite:///') else None
+            if db_path and os.path.exists(db_path):
                 backup_path = os.path.join(
-                    basedir, f'database.backup-pre-licencias-{datetime.now():%Y%m%d%H%M%S}.db'
+                    os.path.dirname(db_path) or basedir,
+                    f'database.backup-pre-licencias-{datetime.now():%Y%m%d%H%M%S}.db'
                 )
                 shutil.copy2(db_path, backup_path)
                 print(f'[migracion] Backup de seguridad creado en {backup_path}')
@@ -346,6 +99,8 @@ def migrar_esquema():
                 conn.exec_driver_sql(
                     'ALTER TABLE agente ADD COLUMN examen_estudio_habilitado BOOLEAN DEFAULT 0'
                 )
+            if 'ultimo_login' not in cols_agente:
+                conn.exec_driver_sql('ALTER TABLE agente ADD COLUMN ultimo_login DATETIME')
             if 'fecha_fin' not in cols_solicitud:
                 conn.exec_driver_sql('ALTER TABLE solicitud ADD COLUMN fecha_fin DATE')
             if 'es_oficio' not in cols_solicitud:
@@ -354,6 +109,10 @@ def migrar_esquema():
                 conn.exec_driver_sql('ALTER TABLE solicitud ADD COLUMN constancia_aviso TEXT')
             if 'creado_en' not in cols_solicitud:
                 conn.exec_driver_sql('ALTER TABLE solicitud ADD COLUMN creado_en DATETIME')
+            if 'notificado' not in cols_solicitud:
+                # DEFAULT 1 se aplica a las filas existentes: el historial no
+                # genera notificaciones falsas al desplegar esta columna.
+                conn.exec_driver_sql('ALTER TABLE solicitud ADD COLUMN notificado BOOLEAN DEFAULT 1')
 
         # 4) Backfill de fecha_fin/creado_en en solicitudes viejas, con la
         #    fórmula vieja (días corridos) porque son licencias históricas
@@ -432,6 +191,22 @@ def migrar_esquema():
                         ))
             db.session.commit()
 
+        # 6) Normaliza tipo_licencia en solicitudes históricas que todavía
+        #    tienen el texto libre del sistema anterior (ej. "Vacaciones
+        #    Enero", "Compensatorios") en vez del código de categoría, para
+        #    que se muestren con el nombre unificado en vez del texto viejo.
+        #    Se persiste una sola vez por fila; una vez normalizada,
+        #    _normalizar_categoria la devuelve igual (idempotente).
+        sin_normalizar = [s for s in Solicitud.query.all() if s.tipo_licencia not in CATEGORIAS]
+        cambios = False
+        for s in sin_normalizar:
+            categoria = _normalizar_categoria(s.tipo_licencia)
+            if categoria:
+                s.tipo_licencia = categoria
+                cambios = True
+        if cambios:
+            db.session.commit()
+
 
 migrar_esquema()
 
@@ -452,6 +227,8 @@ def login():
         if agente_encontrado and bcrypt.check_password_hash(agente_encontrado.clave_hash, clave_form):
             session['id_agente'] = agente_encontrado.id
             session['usuario_agente'] = agente_encontrado.usuario
+            agente_encontrado.ultimo_login = datetime.now()
+            db.session.commit()
             flash('¡Inicio de sesión exitoso!', 'success')
             return redirect(url_for('dashboard'))
         else:
@@ -484,6 +261,16 @@ def dashboard():
         'rechazadas': sum(1 for sol in lista_solicitudes if sol.estado == 'Rechazada')
     }
 
+    # Notificaciones: solicitudes resueltas (aprobadas/rechazadas) desde la
+    # última vez que el agente vio su dashboard. Se cuentan acá y se marcan
+    # como vistas de inmediato, así el aviso solo aparece una vez.
+    sin_notificar = [s for s in lista_solicitudes if s.estado != 'Pendiente' and not s.notificado]
+    notificaciones_nuevas = len(sin_notificar)
+    if sin_notificar:
+        for s in sin_notificar:
+            s.notificado = True
+        db.session.commit()
+
     saldos_por_categoria = {
         s.categoria: s for s in SaldoLicencia.query.filter_by(id_agente=id_del_agente).all()
     }
@@ -495,13 +282,21 @@ def dashboard():
         asignados = saldo.dias_asignados if saldo else 0
         usados = saldo.dias_usados if saldo else 0
         pendientes = saldo.dias_pendientes if saldo else 0
+        fecha_limite = _limite_categoria(codigo)
+        vencida = fecha_limite is not None and date.today() > fecha_limite
+        # <-- NUEVO: pasado el plazo de una categoría, los días no
+        # solicitados se muestran en 0 (sin tocar asignados/usados: si el
+        # admin extiende la fecha, vuelven a aparecer solos).
+        disponibles = 0 if vencida else max(0, asignados - (usados + pendientes))
         saldos_vista.append({
             'categoria': codigo,
             'label': meta['label'],
             'asignados': asignados,
             'usados': usados,
             'pendientes': pendientes,
-            'disponibles': asignados - (usados + pendientes),
+            'vencida': vencida,
+            'fecha_limite': fecha_limite,
+            'disponibles': disponibles,
         })
 
     lista_novedades = Novedad.query.order_by(Novedad.fecha_publicacion.desc()).all()
@@ -511,8 +306,13 @@ def dashboard():
 
     categorias_agente = {
         codigo: meta for codigo, meta in CATEGORIAS.items()
-        if codigo != 'EXAMEN_ESTUDIO' or agente_actual.examen_estudio_habilitado
+        if (codigo != 'EXAMEN_ESTUDIO' or agente_actual.examen_estudio_habilitado)
+        and not _categoria_vencida(codigo)
     }
+
+    proximos_feriados = Feriado.query.filter(
+        Feriado.fecha >= date.today()
+    ).order_by(Feriado.fecha).limit(3).all()
 
     return render_template(
         'dashboard.html',
@@ -523,7 +323,9 @@ def dashboard():
         categorias=categorias_agente,
         categorias_todas=CATEGORIAS,
         novedades=lista_novedades,
-        total_pendientes_global=total_pendientes_global
+        total_pendientes_global=total_pendientes_global,
+        notificaciones_nuevas=notificaciones_nuevas,
+        proximos_feriados=proximos_feriados,
     )
 
 
@@ -544,6 +346,15 @@ def nueva_solicitud():
         flash('Faltan datos en el formulario.', 'danger')
         return redirect(url_for('dashboard'))
 
+    if categoria in CATEGORIAS and _categoria_vencida(categoria):
+        fecha_limite = _limite_categoria(categoria)
+        flash(
+            f'El plazo para solicitar {CATEGORIAS[categoria]["label"]} venció el '
+            f'{fecha_limite.strftime("%d/%m/%Y")}. Consultá con RRHH si corresponde una excepción.',
+            'danger'
+        )
+        return redirect(url_for('dashboard'))
+
     try:
         fecha_inicio = datetime.strptime(fecha_inicio_str, '%Y-%m-%d').date()
         fecha_fin = datetime.strptime(fecha_fin_str, '%Y-%m-%d').date()
@@ -553,11 +364,11 @@ def nueva_solicitud():
 
     feriados = cargar_feriados()
 
-    # Regla de antelación: corte a las 20:30hs del último día hábil previo.
+    # Regla de antelación: corte a la hora de CUTOFF_HORA del último día hábil previo.
     cutoff = calcular_cutoff(fecha_inicio, feriados)
     if datetime.now() > cutoff:
         flash(
-            f'Fuera de término: esta solicitud debía cargarse antes de las 20:30hs del '
+            f'Fuera de término: esta solicitud debía cargarse antes de las {cutoff.strftime("%H:%M")}hs del '
             f'{cutoff.date().strftime("%d/%m/%Y")}. Para una ausencia excepcional o del mismo día, '
             f'avisá por teléfono a RRHH para que lo registren como Carga de Oficio.',
             'danger'
@@ -608,6 +419,15 @@ def editar_solicitud_modal():
     fecha_fin_str = request.form.get('fecha_fin')
     comentario = request.form.get('comentario_agente', '')
 
+    if categoria_nueva in CATEGORIAS and _categoria_vencida(categoria_nueva):
+        fecha_limite = _limite_categoria(categoria_nueva)
+        flash(
+            f'El plazo para {CATEGORIAS[categoria_nueva]["label"]} venció el '
+            f'{fecha_limite.strftime("%d/%m/%Y")}. Consultá con RRHH si corresponde una excepción.',
+            'danger'
+        )
+        return redirect(url_for('dashboard'))
+
     try:
         fecha_inicio = datetime.strptime(fecha_inicio_str, '%Y-%m-%d').date()
         fecha_fin = datetime.strptime(fecha_fin_str, '%Y-%m-%d').date()
@@ -644,7 +464,7 @@ def editar_solicitud_modal():
         return redirect(url_for('dashboard'))
     if categoria_nueva == 'EXAMEN_ESTUDIO' and not agente_actual.examen_estudio_habilitado:
         db.session.rollback()
-        flash('No tenés habilitada la categoría Examen/Estudio.', 'danger')
+        flash(f'No tenés habilitada la categoría {CATEGORIAS["EXAMEN_ESTUDIO"]["label"]}.', 'danger')
         return redirect(url_for('dashboard'))
 
     dias_habiles = contar_dias_habiles(fecha_inicio, fecha_fin, feriados)
@@ -715,6 +535,43 @@ def mi_perfil():
     return render_template('mi_perfil.html', agente=agente_a_editar)
 
 
+@app.route('/mi-historial/exportar')
+def exportar_mi_historial():
+    if 'id_agente' not in session:
+        flash('Debes iniciar sesión para realizar esta acción.', 'warning')
+        return redirect(url_for('login'))
+
+    agente_actual = Agente.query.get(session['id_agente'])
+    solicitudes = Solicitud.query.filter_by(id_agente=session['id_agente']).order_by(Solicitud.fecha_inicio.desc()).all()
+
+    filas = []
+    for s in solicitudes:
+        filas.append({
+            'Categoría': CATEGORIAS.get(s.tipo_licencia, {}).get('label', s.tipo_licencia),
+            'Fecha Inicio': s.fecha_inicio.strftime('%d/%m/%Y'),
+            'Fecha Fin': s.fecha_fin.strftime('%d/%m/%Y') if s.fecha_fin else '',
+            'Días Hábiles': s.dias_solicitados,
+            'Estado': s.estado,
+            'Carga de Oficio': 'Sí' if s.es_oficio else 'No',
+            'Comentario': s.comentario_agente or '',
+            'Comentario de RRHH': s.comentario_admin or '',
+        })
+
+    df = pd.DataFrame(filas)
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Mi Historial')
+    buffer.seek(0)
+
+    nombre_archivo = f'mi_historial_{agente_actual.usuario}_{date.today().strftime("%Y%m%d")}.xlsx'
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=nombre_archivo,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+
+
 # --- RUTAS DE ADMINISTRADOR ---
 @app.route('/admin')
 def panel_admin():
@@ -737,6 +594,7 @@ def panel_admin():
 
     feriados = Feriado.query.order_by(Feriado.fecha).all()
     periodos_veda = PeriodoVeda.query.order_by(PeriodoVeda.fecha_inicio).all()
+    limites = {l.categoria: l.fecha_limite for l in LimiteCategoria.query.all()}
 
     total_licencias_pendientes = len(solicitudes_pendientes)
 
@@ -753,6 +611,100 @@ def panel_admin():
         saldos_por_agente=saldos_por_agente,
         feriados=feriados,
         periodos_veda=periodos_veda,
+        limites=limites,
+    )
+
+
+def _filas_reporte_saldos():
+    """Arma, para cada agente, el saldo (disponibles/asignados) de cada
+    categoría. A diferencia del dashboard del agente, acá se muestra el
+    disponible REAL incluso si la categoría está vencida — el admin necesita
+    ver cuántos días le quedaban al agente para poder decidir sobre una
+    prórroga; el agente en su propio dashboard sigue viendo 0 (ver
+    REGLAS_DE_NEGOCIO.md). Se reutiliza tanto para la vista en pantalla como
+    para la exportación a Excel."""
+    agentes = Agente.query.order_by(Agente.nombre_completo).all()
+    saldos_por_agente = {}
+    for s in SaldoLicencia.query.all():
+        saldos_por_agente.setdefault(s.id_agente, {})[s.categoria] = s
+
+    vencidas = {codigo: _categoria_vencida(codigo) for codigo in CATEGORIAS}
+
+    filas = []
+    for agente in agentes:
+        saldos_ag = saldos_por_agente.get(agente.id, {})
+        categorias_fila = {}
+        for codigo in CATEGORIAS:
+            saldo = saldos_ag.get(codigo)
+            asignados = saldo.dias_asignados if saldo else 0
+            usados = saldo.dias_usados if saldo else 0
+            pendientes = saldo.dias_pendientes if saldo else 0
+            disponibles = max(0, asignados - (usados + pendientes))
+            habilitada = codigo != 'EXAMEN_ESTUDIO' or agente.examen_estudio_habilitado
+            categorias_fila[codigo] = {
+                'asignados': asignados,
+                'disponibles': disponibles,
+                'habilitada': habilitada,
+                'vencida': vencidas[codigo],
+            }
+        filas.append({'agente': agente, 'categorias': categorias_fila})
+
+    return filas
+
+
+@app.route('/admin/reporte')
+def reporte_saldos():
+    if 'id_agente' not in session or not Agente.query.get(session['id_agente']).es_admin:
+        flash('No tienes permiso para acceder a esta página.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    return render_template(
+        'reporte_saldos.html',
+        filas=_filas_reporte_saldos(),
+        categorias=CATEGORIAS,
+        generado_en=datetime.now(),
+    )
+
+
+@app.route('/admin/reporte/exportar')
+def exportar_reporte_saldos():
+    if 'id_agente' not in session or not Agente.query.get(session['id_agente']).es_admin:
+        flash('No tienes permiso para acceder a esta página.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    filas_planas = []
+    for fila in _filas_reporte_saldos():
+        agente = fila['agente']
+        registro = {
+            'Agente': agente.nombre_completo,
+            'Usuario': agente.usuario,
+            'Estado': 'Activo' if agente.esta_activo else 'Inactivo',
+            'Última Conexión': agente.ultimo_login.strftime('%d/%m/%Y %H:%M') if agente.ultimo_login else 'Nunca',
+        }
+        for codigo, meta in CATEGORIAS.items():
+            c = fila['categorias'][codigo]
+            if c['habilitada']:
+                registro[f'{meta["label"]} - Disponibles'] = c['disponibles']
+                registro[f'{meta["label"]} - Asignados'] = c['asignados']
+                registro[f'{meta["label"]} - Vencida'] = 'Sí' if c['vencida'] else ''
+            else:
+                registro[f'{meta["label"]} - Disponibles'] = ''
+                registro[f'{meta["label"]} - Asignados'] = ''
+                registro[f'{meta["label"]} - Vencida'] = ''
+        filas_planas.append(registro)
+
+    df = pd.DataFrame(filas_planas)
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Reporte de Agentes')
+    buffer.seek(0)
+
+    nombre_archivo = f'reporte_agentes_{date.today().strftime("%Y%m%d")}.xlsx'
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=nombre_archivo,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     )
 
 
@@ -780,6 +732,17 @@ def carga_oficio():
         fecha_fin = datetime.strptime(fecha_fin_str, '%Y-%m-%d').date()
     except ValueError:
         flash('Las fechas ingresadas no son válidas.', 'danger')
+        return redirect(url_for('panel_admin'))
+
+    # Protección contra doble-submit (doble click, Enter repetido, reintento
+    # de red): si ya existe una carga de oficio idéntica para este agente
+    # cargada en los últimos 15 segundos, no se crea una segunda.
+    duplicado = Solicitud.query.filter_by(
+        id_agente=agente.id, tipo_licencia=categoria, fecha_inicio=fecha_inicio,
+        fecha_fin=fecha_fin, es_oficio=True,
+    ).filter(Solicitud.creado_en >= datetime.now() - timedelta(seconds=15)).first()
+    if duplicado:
+        flash(f'Esa carga de oficio ya se había registrado para {agente.nombre_completo}.', 'warning')
         return redirect(url_for('panel_admin'))
 
     solicitud, error = _crear_solicitud(
@@ -830,6 +793,61 @@ def agregar_feriado():
         )
     else:
         flash('Feriado agregado correctamente.', 'success')
+
+    return redirect(url_for('panel_admin'))
+
+
+@app.route('/admin/feriados/editar/<int:id_feriado>', methods=['POST'])
+def editar_feriado(id_feriado):
+    if 'id_agente' not in session or not Agente.query.get(session['id_agente']).es_admin:
+        flash('Acción no autorizada.', 'danger')
+        return redirect(url_for('login'))
+
+    feriado = Feriado.query.get_or_404(id_feriado)
+
+    fecha_str = request.form.get('fecha')
+    descripcion = request.form.get('descripcion')
+    tipo = request.form.get('tipo', 'Nacional')
+
+    if not fecha_str or not descripcion:
+        flash('Faltan datos del feriado.', 'danger')
+        return redirect(url_for('panel_admin'))
+
+    try:
+        fecha = datetime.strptime(fecha_str, '%Y-%m-%d').date()
+    except ValueError:
+        flash('Fecha inválida.', 'danger')
+        return redirect(url_for('panel_admin'))
+
+    otro = Feriado.query.filter(Feriado.fecha == fecha, Feriado.id != id_feriado).first()
+    if otro:
+        flash('Ya existe otro feriado cargado para esa fecha.', 'warning')
+        return redirect(url_for('panel_admin'))
+
+    fecha_cambio = fecha != feriado.fecha
+    feriado.fecha = fecha
+    feriado.descripcion = descripcion
+    feriado.tipo = tipo
+    db.session.commit()
+
+    # Si se movió la fecha, la nueva fecha se trata igual que un feriado
+    # recién agregado: puede caer dentro de una licencia aprobada y
+    # recalcularla. La fecha vieja no se recalcula al revés (tampoco lo
+    # hace eliminar_feriado): si una licencia se achicó por el feriado
+    # anterior, mover o borrar el feriado no le devuelve el día
+    # automáticamente — eso requiere revisión manual del admin.
+    if fecha_cambio:
+        afectadas = recalcular_por_nuevo_feriado(fecha)
+        if afectadas:
+            flash(
+                f'Feriado actualizado. Se recalcularon {len(afectadas)} solicitud(es) aprobada(s) '
+                f'que incluían la nueva fecha.',
+                'info'
+            )
+        else:
+            flash('Feriado actualizado correctamente.', 'success')
+    else:
+        flash('Feriado actualizado correctamente.', 'success')
 
     return redirect(url_for('panel_admin'))
 
@@ -949,6 +967,45 @@ def eliminar_veda(id_veda):
     db.session.delete(veda)
     db.session.commit()
     flash('Período de veda eliminado.', 'success')
+    return redirect(url_for('panel_admin'))
+
+
+@app.route('/admin/limites/guardar', methods=['POST'])
+def guardar_limites():
+    if 'id_agente' not in session or not Agente.query.get(session['id_agente']).es_admin:
+        flash('Acción no autorizada.', 'danger')
+        return redirect(url_for('login'))
+
+    cambios = 0
+    for codigo in CATEGORIAS:
+        valor = request.form.get(f'limite_{codigo}', '').strip()
+        limite_actual = LimiteCategoria.query.filter_by(categoria=codigo).first()
+
+        if not valor:
+            if limite_actual:
+                db.session.delete(limite_actual)
+                cambios += 1
+            continue
+
+        try:
+            fecha = datetime.strptime(valor, '%Y-%m-%d').date()
+        except ValueError:
+            flash(f'Fecha inválida para {CATEGORIAS[codigo]["label"]}.', 'danger')
+            continue
+
+        if limite_actual:
+            if limite_actual.fecha_limite != fecha:
+                limite_actual.fecha_limite = fecha
+                cambios += 1
+        else:
+            db.session.add(LimiteCategoria(categoria=codigo, fecha_limite=fecha))
+            cambios += 1
+
+    db.session.commit()
+    if cambios:
+        flash('Plazos de vigencia actualizados.', 'success')
+    else:
+        flash('No hubo cambios en los plazos.', 'info')
     return redirect(url_for('panel_admin'))
 
 
@@ -1153,15 +1210,47 @@ def aprobar_solicitud(id_solicitud):
     agente = solicitud.agente
     solicitud.comentario_admin = request.form.get('comentario_admin')
 
-    categoria = _normalizar_categoria(solicitud.tipo_licencia) or solicitud.tipo_licencia
-    solicitud.tipo_licencia = categoria
-    saldo = _obtener_o_crear_saldo(agente.id, categoria)
-    saldo.dias_pendientes = max(0, saldo.dias_pendientes - solicitud.dias_solicitados)
-    saldo.dias_usados += solicitud.dias_solicitados
+    categoria_original = _normalizar_categoria(solicitud.tipo_licencia) or solicitud.tipo_licencia
+    solicitud.tipo_licencia = categoria_original
+
+    # <-- NUEVO: el admin puede reclasificar la categoría de la licencia a
+    # discreción justo antes de aprobarla (ej. pidieron LAO pero corresponde
+    # Invierno). Si no viene un valor válido en el form, se mantiene la
+    # categoría original tal cual venía.
+    categoria_elegida = request.form.get('categoria')
+    categoria_final = categoria_elegida if categoria_elegida in CATEGORIAS else categoria_original
+
+    saldo_original = _obtener_o_crear_saldo(agente.id, categoria_original)
+
+    if categoria_final != categoria_original:
+        saldo_nuevo = _obtener_o_crear_saldo(agente.id, categoria_final)
+        if saldo_nuevo.dias_disponibles < solicitud.dias_solicitados:
+            flash(
+                f'No se pudo reclasificar a {CATEGORIAS[categoria_final]["label"]}: '
+                f'{agente.nombre_completo} no tiene suficientes días disponibles en esa categoría '
+                f'(disponibles: {saldo_nuevo.dias_disponibles}, se necesitan: {solicitud.dias_solicitados}).',
+                'danger'
+            )
+            return redirect(url_for('panel_admin'))
+        saldo_original.dias_pendientes = max(0, saldo_original.dias_pendientes - solicitud.dias_solicitados)
+        saldo_nuevo.dias_usados += solicitud.dias_solicitados
+        solicitud.tipo_licencia = categoria_final
+    else:
+        saldo_original.dias_pendientes = max(0, saldo_original.dias_pendientes - solicitud.dias_solicitados)
+        saldo_original.dias_usados += solicitud.dias_solicitados
+
     solicitud.estado = 'Aprobada'
+    solicitud.notificado = False
 
     db.session.commit()
-    flash(f"Solicitud de {agente.nombre_completo} APROBADA.", 'success')
+    if categoria_final != categoria_original:
+        flash(
+            f"Solicitud de {agente.nombre_completo} APROBADA, reclasificada de "
+            f"{CATEGORIAS[categoria_original]['label']} a {CATEGORIAS[categoria_final]['label']}.",
+            'success'
+        )
+    else:
+        flash(f"Solicitud de {agente.nombre_completo} APROBADA.", 'success')
     return redirect(url_for('panel_admin'))
 
 @app.route('/rechazar_solicitud/<int:id_solicitud>', methods=['POST'])
@@ -1181,6 +1270,7 @@ def rechazar_solicitud(id_solicitud):
     saldo.dias_pendientes = max(0, saldo.dias_pendientes - solicitud.dias_solicitados)
 
     solicitud.estado = 'Rechazada'
+    solicitud.notificado = False
     solicitud.comentario_admin = request.form.get('comentario_admin')
 
     db.session.commit()
@@ -1222,6 +1312,7 @@ def rectificar_solicitud(id_solicitud):
     saldo.dias_pendientes += solicitud.dias_solicitados
 
     solicitud.estado = 'Pendiente'
+    solicitud.notificado = True
     solicitud.comentario_admin = None
 
     db.session.commit()
@@ -1257,13 +1348,35 @@ def eliminar_solicitud(id_solicitud):
     return redirect(url_for('dashboard'))
 
 
+@app.route('/admin/eliminar-solicitud/<int:id_solicitud>', methods=['POST'])
+def admin_eliminar_solicitud(id_solicitud):
+    if 'id_agente' not in session or not Agente.query.get(session['id_agente']).es_admin:
+        flash('Acción no autorizada.', 'danger')
+        return redirect(url_for('login'))
+
+    solicitud = Solicitud.query.get_or_404(id_solicitud)
+    if solicitud.estado != 'Pendiente':
+        flash('Solo pueden eliminarse solicitudes pendientes. Si ya fue gestionada, devolvela a Pendientes primero.', 'warning')
+        return redirect(url_for('panel_admin'))
+
+    nombre = solicitud.agente.nombre_completo
+    categoria = _normalizar_categoria(solicitud.tipo_licencia) or solicitud.tipo_licencia
+    saldo = _obtener_o_crear_saldo(solicitud.id_agente, categoria)
+    saldo.dias_pendientes = max(0, saldo.dias_pendientes - solicitud.dias_solicitados)
+    db.session.delete(solicitud)
+    db.session.commit()
+
+    flash(f'La solicitud de {nombre} fue eliminada y se liberaron sus días reservados.', 'success')
+    return redirect(url_for('panel_admin'))
+
+
 @app.route('/admin/nueva_novedad', methods=['POST'])
 def publicar_novedad():
     if 'id_agente' not in session or not Agente.query.get(session['id_agente']).es_admin:
         flash('Acción no autorizada.', 'danger')
         return redirect(url_for('login'))
     titulo = request.form['titulo']
-    mensaje = request.form['mensaje']
+    mensaje = _sanitizar_mensaje(request.form['mensaje'])
     nueva_novedad = Novedad(titulo=titulo, mensaje=mensaje)
     db.session.add(nueva_novedad)
     db.session.commit()
@@ -1278,7 +1391,7 @@ def editar_novedad(id_novedad):
 
     novedad_a_editar = Novedad.query.get_or_404(id_novedad)
     novedad_a_editar.titulo = request.form.get('titulo')
-    novedad_a_editar.mensaje = request.form.get('mensaje')
+    novedad_a_editar.mensaje = _sanitizar_mensaje(request.form.get('mensaje'))
     db.session.commit()
 
     flash('La novedad ha sido actualizada exitosamente.', 'success')

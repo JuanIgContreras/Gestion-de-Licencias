@@ -149,6 +149,14 @@ const AgentDashboard = {
         this.setupRequestModal();
         this.setupDetailModal();
         this.setupDiasHabilesPreview();
+        this.setupProximosFeriadosModal();
+    },
+
+    setupProximosFeriadosModal() {
+        const openBtn = document.getElementById('openProximosFeriadosBtn');
+        if (!openBtn) return;
+        openBtn.addEventListener('click', () => ModalManager.open('proximosFeriadosModal'));
+        ModalManager.setupCloseButton('closeProximosFeriadosBtn', 'proximosFeriadosModal');
     },
 
     setupRequestModal() {
@@ -349,6 +357,8 @@ const RequestManagement = {
                 document.getElementById('detail-fecha-fin').textContent = d.fechaFin;
                 document.getElementById('detail-dias').textContent = d.dias;
                 document.getElementById('detail-comentario').textContent = d.comentario;
+                const categoriaSelect = document.getElementById('detail-categoria-select');
+                if (categoriaSelect && d.categoria) categoriaSelect.value = d.categoria;
                 document.getElementById('approve-form').action = `/aprobar_solicitud/${d.id}`;
                 document.getElementById('reject-form').action = `/rechazar_solicitud/${d.id}`;
                 ModalManager.open('solicitudDetailModal');
@@ -359,11 +369,14 @@ const RequestManagement = {
 
     setupAdminComments() {
         const commentText = document.getElementById('comentario_admin_text');
+        const categoriaSelect = document.getElementById('detail-categoria-select');
         ['approve-form', 'reject-form'].forEach(id => {
             const form = document.getElementById(id);
             if (form) {
                 form.addEventListener('submit', function() {
                     form.querySelector('input[name="comentario_admin"]').value = commentText.value;
+                    const categoriaInput = form.querySelector('input[name="categoria"]');
+                    if (categoriaInput && categoriaSelect) categoriaInput.value = categoriaSelect.value;
                 });
             }
         });
@@ -382,6 +395,19 @@ const FeriadosManagement = {
         const openImport = document.getElementById('openImportarFeriadosModalBtn');
         if (openImport) openImport.addEventListener('click', () => ModalManager.open('importarFeriadosModal'));
         ModalManager.setupCloseButton('closeImportarFeriadosModalBtn', 'importarFeriadosModal');
+
+        ModalManager.setupCloseButton('closeEditFeriadoModalBtn', 'editFeriadoModal');
+        document.querySelectorAll('.edit-feriado-btn').forEach(btn => {
+            btn.addEventListener('click', function () {
+                const d = this.dataset;
+                const form = document.getElementById('editFeriadoForm');
+                form.action = `/admin/feriados/editar/${d.id}`;
+                document.getElementById('edit-feriado-fecha').value = d.fecha;
+                document.getElementById('edit-feriado-descripcion').value = d.descripcion;
+                document.getElementById('edit-feriado-tipo').value = d.tipo;
+                ModalManager.open('editFeriadoModal');
+            });
+        });
     }
 };
 
@@ -404,6 +430,21 @@ const CargaOficioManagement = {
         const openBtn = document.getElementById('openCargaOficioModalBtn');
         if (openBtn) openBtn.addEventListener('click', () => ModalManager.open('cargaOficioModal'));
         ModalManager.setupCloseButton('closeCargaOficioModalBtn', 'cargaOficioModal');
+
+        // Evita el doble-submit (doble click o Enter repetido): al enviar,
+        // se bloquea el botón para que un segundo click no dispare una
+        // segunda carga de oficio idéntica mientras la primera todavía
+        // está en camino al servidor.
+        const form = document.querySelector('#cargaOficioModal form');
+        if (form) {
+            form.addEventListener('submit', () => {
+                const btn = form.querySelector('button[type="submit"]');
+                if (btn) {
+                    btn.disabled = true;
+                    btn.textContent = 'Registrando...';
+                }
+            });
+        }
     }
 };
 
@@ -432,6 +473,99 @@ const CierreEjercicioManagement = {
 };
 
 // =====================================================
+// EDITOR DE TEXTO ENRIQUECIDO (mensajes de Novedades)
+// =====================================================
+const RichTextEditor = {
+    init() {
+        document.querySelectorAll('.rich-editor').forEach(editor => {
+            const textarea = document.getElementById(editor.dataset.textarea);
+            if (!textarea) return;
+
+            const sincronizar = () => { textarea.value = editor.innerHTML.trim(); };
+            editor.addEventListener('input', sincronizar);
+
+            const form = editor.closest('form');
+            if (form) {
+                form.addEventListener('submit', (e) => {
+                    sincronizar();
+                    if (!editor.textContent.trim()) {
+                        e.preventDefault();
+                        editor.classList.add('rich-editor-error');
+                        editor.focus();
+                    } else {
+                        editor.classList.remove('rich-editor-error');
+                    }
+                });
+            }
+        });
+
+        document.querySelectorAll('.rich-toolbar').forEach(toolbar => {
+            const editor = document.getElementById(toolbar.dataset.target);
+            if (!editor) return;
+            toolbar.querySelectorAll('.rich-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    editor.focus();
+                    document.execCommand(btn.dataset.command, false, null);
+                    editor.dispatchEvent(new Event('input'));
+                });
+            });
+        });
+    },
+
+    cargarContenido(editorId, html) {
+        const editor = document.getElementById(editorId);
+        if (!editor) return;
+        editor.innerHTML = html || '';
+        editor.classList.remove('rich-editor-error');
+        editor.dispatchEvent(new Event('input'));
+    }
+};
+
+// =====================================================
+// BUSCADOR / FILTRO DE TABLAS (ADMIN)
+// =====================================================
+const TableFilter = {
+    init() {
+        document.querySelectorAll('.filter-input').forEach(input => {
+            const tablas = document.querySelectorAll(input.dataset.filterTarget);
+            if (!tablas.length) return;
+            input.addEventListener('input', () => {
+                const query = input.value.trim().toLowerCase();
+                tablas.forEach(tabla => this.filtrarTabla(tabla, query));
+            });
+        });
+    },
+
+    filtrarTabla(tabla, query) {
+        const tbody = tabla.querySelector('tbody');
+        if (!tbody) return;
+        const filas = tbody.querySelectorAll('tr[data-filter-row]');
+        let visibles = 0;
+
+        filas.forEach(fila => {
+            const coincide = !query || fila.textContent.toLowerCase().includes(query);
+            fila.style.display = coincide ? '' : 'none';
+            if (coincide) visibles++;
+        });
+
+        let filaVacia = tbody.querySelector('.filter-empty-row');
+        if (query && visibles === 0) {
+            if (!filaVacia) {
+                const columnas = tabla.querySelectorAll('thead th').length || 1;
+                filaVacia = document.createElement('tr');
+                filaVacia.className = 'filter-empty-row';
+                filaVacia.innerHTML = `<td colspan="${columnas}" style="text-align:center; color:#6c757d;">No se encontraron resultados.</td>`;
+                tbody.appendChild(filaVacia);
+            }
+            filaVacia.style.display = '';
+        } else if (filaVacia) {
+            filaVacia.style.display = 'none';
+        }
+    }
+};
+
+// =====================================================
 // GESTIÓN DE NOVEDADES (ADMIN)
 // =====================================================
 const NewsManagement = {
@@ -455,7 +589,7 @@ const NewsManagement = {
                 const form = document.getElementById('editNovedadForm');
                 form.action = `/admin/editar-novedad/${d.id}`;
                 document.getElementById('edit-titulo').value = d.titulo;
-                document.getElementById('edit-mensaje').value = d.mensaje;
+                RichTextEditor.cargarContenido('edit-mensaje-editor', d.mensaje);
                 ModalManager.open('editNovedadModal');
             });
         });
@@ -474,8 +608,21 @@ const ConfirmationManager = {
                 this.handleDeleteNews(e);
             } else if (e.target.classList.contains('delete-agent-form')) {
                 this.handleDeleteAgent(e);
+            } else if (e.target.classList.contains('delete-solicitud-form')) {
+                this.handleDeleteSolicitud(e);
             }
         });
+    },
+
+    handleDeleteSolicitud(e) {
+        e.preventDefault();
+        const form = e.target;
+        const name = form.closest('tr').querySelector('td').textContent.trim();
+        Swal.fire({
+            title: '¿Eliminar esta solicitud?',
+            html: `La solicitud pendiente de <strong>${name}</strong> se eliminará y se liberarán los días reservados. No se puede revertir.`,
+            icon: 'warning', showCancelButton: true, confirmButtonText: 'Eliminar', confirmButtonColor: '#dc3545',
+        }).then(r => { if (r.isConfirmed) form.submit(); });
     },
 
     handleRectify(e) {
@@ -518,6 +665,8 @@ document.addEventListener('DOMContentLoaded', () => {
     VedaManagement.init();
     CargaOficioManagement.init();
     CierreEjercicioManagement.init();
+    RichTextEditor.init();
+    TableFilter.init();
     NewsManagement.init();
     ConfirmationManager.init();
     CalendarioManager.init();
@@ -726,16 +875,24 @@ const CalendarioManager = {
                 celda.appendChild(etiquetaFeriado);
             }
 
-            // Agregar eventos de este día (solo nombre del agente, sin categoría ni motivo)
-            eventos.forEach(evento => {
-                if (fechaActual >= evento.fecha_inicio && fechaActual <= evento.fecha_fin) {
-                    const eventoDiv = document.createElement('div');
-                    eventoDiv.className = 'calendario-evento';
-                    eventoDiv.textContent = evento.agente;
-                    eventoDiv.title = `${evento.agente} - Ausente/Licencia`;
-                    celda.appendChild(eventoDiv);
-                }
-            });
+            // El rango fecha_inicio-fecha_fin de una licencia puede atravesar
+            // fines de semana o feriados (son días que ya no eran hábiles, no
+            // se "usaron"). Por eso el evento solo se dibuja si el día en
+            // cuestión es hábil: de lunes a viernes y sin feriado cargado.
+            const diaSemana = new Date(año, mes - 1, dia).getDay();
+            const esDiaHabil = diaSemana !== 0 && diaSemana !== 6 && !feriadosPorFecha[fechaActual];
+
+            if (esDiaHabil) {
+                eventos.forEach(evento => {
+                    if (fechaActual >= evento.fecha_inicio && fechaActual <= evento.fecha_fin) {
+                        const eventoDiv = document.createElement('div');
+                        eventoDiv.className = 'calendario-evento';
+                        eventoDiv.textContent = evento.agente;
+                        eventoDiv.title = `${evento.agente} - Ausente/Licencia`;
+                        celda.appendChild(eventoDiv);
+                    }
+                });
+            }
 
             grid.appendChild(celda);
         }
