@@ -8,9 +8,22 @@
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
+                    {% if category == 'fuera-plazo' %}
+                    <script>
+                        document.addEventListener('DOMContentLoaded', function () {
+                            Swal.fire({
+                                title: 'Fuera de plazo',
+                                text: {{ message|tojson }},
+                                icon: 'warning',
+                                confirmButtonText: 'Entendido',
+                            });
+                        });
+                    </script>
+                    {% else %}
                     <div class="alert-{{ category }}">
                         {{ message }}
                     </div>
+                    {% endif %}
                 {% endfor %}
             {% endif %}
         {% endwith %}

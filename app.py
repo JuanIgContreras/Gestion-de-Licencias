@@ -19,6 +19,11 @@ from motor_licencias import (
     _sanitizar_mensaje,
 )
 
+MENSAJE_FUERA_DE_PLAZO = (
+    'Fuera de plazo para solicitar esta solicitud, deberá informar al '
+    'Director/Jefa de Personal por teléfono.'
+)
+
 # --- CONFIGURACIÓN INICIAL ---
 basedir = os.path.abspath(os.path.dirname(__file__))
 app = Flask(__name__)
@@ -367,12 +372,7 @@ def nueva_solicitud():
     # Regla de antelación: corte a la hora de CUTOFF_HORA del último día hábil previo.
     cutoff = calcular_cutoff(fecha_inicio, feriados)
     if datetime.now() > cutoff:
-        flash(
-            f'Fuera de término: esta solicitud debía cargarse antes de las {cutoff.strftime("%H:%M")}hs del '
-            f'{cutoff.date().strftime("%d/%m/%Y")}. Para una ausencia excepcional o del mismo día, '
-            f'avisá por teléfono a RRHH para que lo registren como Carga de Oficio.',
-            'danger'
-        )
+        flash(MENSAJE_FUERA_DE_PLAZO, 'fuera-plazo')
         return redirect(url_for('dashboard'))
 
     # Veda administrativa: los agentes no pueden cargar solicitudes propias
@@ -438,7 +438,7 @@ def editar_solicitud_modal():
     feriados = cargar_feriados()
     cutoff = calcular_cutoff(fecha_inicio, feriados)
     if datetime.now() > cutoff:
-        flash('Fuera de término: no se puede reprogramar la solicitud para esa fecha de inicio.', 'danger')
+        flash(MENSAJE_FUERA_DE_PLAZO, 'fuera-plazo')
         return redirect(url_for('dashboard'))
 
     veda = PeriodoVeda.query.filter(

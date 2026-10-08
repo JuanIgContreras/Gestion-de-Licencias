@@ -249,7 +249,7 @@ def test_corte_de_antelacion_rechaza_solicitud_para_hoy(app, client, agente_id):
     r = client.post('/nueva-solicitud', data={
         'tipo_licencia': 'LAO', 'fecha_inicio': hoy.isoformat(), 'fecha_fin': hoy.isoformat(),
     }, follow_redirects=True)
-    assert 'Fuera de término' in r.get_data(as_text=True)
+    assert 'Fuera de plazo' in r.get_data(as_text=True)
     with app.app_context():
         assert Solicitud.query.filter_by(id_agente=agente_id).count() == 0
 

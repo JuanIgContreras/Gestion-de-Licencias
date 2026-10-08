@@ -62,12 +62,6 @@ const Utils = {
             alertDiv.style.transform = 'translateY(-20px)';
             setTimeout(() => alertDiv.remove(), 500);
         }, 5000);
-    },
-
-    closeModalOnOutsideClick(event) {
-        if (event.target.classList.contains('modal')) {
-            event.target.style.display = "none";
-        }
     }
 };
 
@@ -76,7 +70,6 @@ const Utils = {
 // =====================================================
 const ModalManager = {
     init() {
-        window.addEventListener('click', Utils.closeModalOnOutsideClick);
     },
 
     open(modalId) {
@@ -707,10 +700,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // Cerrar al hacer clic fuera
-  window.onclick = event => {
-    if (event.target === modal) modal.style.display = "none";
-  };
 });
 
 // ===============================
@@ -736,7 +725,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   closeBtn.onclick = cerrarModal;
   cancelBtn.onclick = cerrarModal;
-  window.onclick = e => { if (e.target === modal) cerrarModal(); };
 });
 
 function confirmarEliminarSolicitud(idSolicitud) {
