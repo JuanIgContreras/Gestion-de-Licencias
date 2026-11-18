@@ -734,3 +734,19 @@ h2 .badge-pendientes {
     .reporte-tabla th, .reporte-tabla td { padding: 4px 8px; }
     .reporte-tabla thead th { background-color: #f1f1f1 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+
+
+/* =================================
+   REGISTRO DE ACTIVIDAD
+   ================================= */
+.actividad-filtros { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 18px; }
+.actividad-filtros .form-group { margin: 0; }
+.actividad-filtros label { display: block; font-size: 0.85em; color: #6c757d; margin-bottom: 4px; }
+.actividad-filtros input, .actividad-filtros select { padding: 8px 10px; border: 1px solid #ced4da; border-radius: 6px; }
+.actividad-tabla td { text-align: left; vertical-align: top; }
+.actividad-tabla td.actividad-fecha { white-space: nowrap; color: #6c757d; }
+.act-badge { display: inline-block; padding: 2px 9px; border-radius: 10px; font-size: 0.8em; background: #e7f1ff; color: #084298; white-space: nowrap; }
+.act-badge.act-rechazo { background: #f8d7da; color: #842029; }
+.act-badge.act-ingreso { background: #e2e3e5; color: #41464b; }
+.actividad-paginacion { display: flex; justify-content: center; align-items: center; gap: 16px; margin: 20px 0; }
+.actividad-paginacion .disabled { opacity: 0.4; pointer-events: none; }

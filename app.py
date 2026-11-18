@@ -10,7 +10,8 @@ import click
 
 from extensions import db, bcrypt, csrf
 from models import (
-    CATEGORIAS, Agente, SaldoLicencia, Feriado, PeriodoVeda, LimiteCategoria, Solicitud, Novedad,
+    CATEGORIAS, TIPOS_ACTIVIDAD, Agente, SaldoLicencia, Feriado, PeriodoVeda, LimiteCategoria,
+    Solicitud, Novedad, RegistroActividad,
 )
 from motor_licencias import (
     CUTOFF_HORA, cargar_feriados, contar_dias_habiles, fecha_fin_para_n_dias_habiles,
@@ -58,6 +59,45 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db.init_app(app)
 bcrypt.init_app(app)
 csrf.init_app(app)
+
+
+# --- BITÁCORA DE ACTIVIDAD ---
+def registrar_actividad(tipo, detalle, agente=None, actor_texto=None, commit=False):
+    """Agrega una línea a la bitácora (ver RegistroActividad). Por defecto no
+    hace commit: se suma a la transacción de la acción que se está registrando,
+    así la acción y su registro se guardan juntos o no se guardan. Quien actuó
+    sale del parámetro `agente`, o de la sesión, o de `actor_texto` si es
+    alguien sin cuenta (ej. un intento de ingreso con un usuario inexistente)."""
+    id_actor = None
+    if actor_texto:
+        nombre = actor_texto
+    else:
+        if agente is None and session.get('id_agente'):
+            agente = db.session.get(Agente, session['id_agente'])
+        id_actor = agente.id if agente else None
+        nombre = agente.nombre_completo if agente else 'Sistema'
+    db.session.add(RegistroActividad(
+        id_actor=id_actor, actor=nombre[:200], tipo=tipo, detalle=detalle[:500],
+    ))
+    if commit:
+        db.session.commit()
+
+
+def _desc_solicitud(s, agente=None):
+    """'NOMBRE (Categoría, 10/11/2026 al 12/11/2026, 3 día(s))' para el detalle."""
+    ag = agente or s.agente
+    etiqueta = CATEGORIAS.get(s.tipo_licencia, {}).get('label', s.tipo_licencia)
+    fin = s.fecha_fin or s.fecha_inicio
+    return (f'{ag.nombre_completo} ({etiqueta}, {s.fecha_inicio.strftime("%d/%m/%Y")} al '
+            f'{fin.strftime("%d/%m/%Y")}, {s.dias_solicitados} día(s))')
+
+
+def _registrar_rechazo(motivo, categoria, fecha_inicio=None, fecha_fin=None):
+    """Intento bloqueado por el sistema (fuera de plazo, sin saldo, veda...)."""
+    partes = [CATEGORIAS.get(categoria, {}).get('label', categoria or '?')]
+    if fecha_inicio and fecha_fin:
+        partes.append(f'{fecha_inicio.strftime("%d/%m/%Y")} al {fecha_fin.strftime("%d/%m/%Y")}')
+    registrar_actividad('rechazo', f'{motivo} — {", ".join(partes)}', commit=True)
 
 
 # --- MIGRACIÓN DE ESQUEMA ---
@@ -227,6 +267,8 @@ def login():
         agente_encontrado = Agente.query.filter_by(usuario=usuario_form).first()
 
         if agente_encontrado and not agente_encontrado.esta_activo:
+            registrar_actividad('ingreso', 'Ingreso bloqueado: la cuenta está desactivada',
+                                agente=agente_encontrado, commit=True)
             flash('Tu cuenta ha sido desactivada. Contacta a RRHH.', 'danger')
             return redirect(url_for('login'))
 
@@ -234,16 +276,25 @@ def login():
             session['id_agente'] = agente_encontrado.id
             session['usuario_agente'] = agente_encontrado.usuario
             agente_encontrado.ultimo_login = datetime.now()
+            registrar_actividad('ingreso', 'Inició sesión', agente=agente_encontrado)
             db.session.commit()
             flash('¡Inicio de sesión exitoso!', 'success')
             return redirect(url_for('dashboard'))
         else:
+            if agente_encontrado:
+                registrar_actividad('ingreso', 'Ingreso fallido: contraseña incorrecta',
+                                    agente=agente_encontrado, commit=True)
+            else:
+                registrar_actividad('ingreso', f'Ingreso fallido: el usuario "{usuario_form}" no existe',
+                                    actor_texto=f'Usuario "{usuario_form}"', commit=True)
             flash('Usuario o contraseña incorrectos.', 'danger')
             return redirect(url_for('login'))
     return render_template('login.html')
 
 @app.route('/logout')
 def logout():
+    if session.get('id_agente'):
+        registrar_actividad('ingreso', 'Cerró sesión', commit=True)
     session.pop('id_agente', None)
     session.pop('usuario_agente', None)
     flash('Has cerrado la sesión exitosamente.', 'success')
@@ -354,6 +405,7 @@ def nueva_solicitud():
 
     if categoria in CATEGORIAS and _categoria_vencida(categoria):
         fecha_limite = _limite_categoria(categoria)
+        _registrar_rechazo('Plazo de la categoría vencido', categoria)
         flash(
             f'El plazo para solicitar {CATEGORIAS[categoria]["label"]} venció el '
             f'{fecha_limite.strftime("%d/%m/%Y")}. Consultá con RRHH si corresponde una excepción.',
@@ -373,6 +425,7 @@ def nueva_solicitud():
     # Regla de antelación: corte a la hora de CUTOFF_HORA del último día hábil previo.
     cutoff = calcular_cutoff(fecha_inicio, feriados)
     if datetime.now() > cutoff:
+        _registrar_rechazo('Fuera de plazo', categoria, fecha_inicio, fecha_fin)
         flash(MENSAJE_FUERA_DE_PLAZO, 'fuera-plazo')
         return redirect(url_for('dashboard'))
 
@@ -383,6 +436,7 @@ def nueva_solicitud():
         PeriodoVeda.fecha_fin >= fecha_inicio
     ).first()
     if veda:
+        _registrar_rechazo(f'Período de veda ({veda.motivo})', categoria, fecha_inicio, fecha_fin)
         flash(
             f'No se pueden cargar solicitudes entre el {veda.fecha_inicio.strftime("%d/%m/%Y")} y el '
             f'{veda.fecha_fin.strftime("%d/%m/%Y")} ({veda.motivo}). Consultá con RRHH.',
@@ -392,6 +446,7 @@ def nueva_solicitud():
 
     solicitud, error = _crear_solicitud(agente_actual, categoria, fecha_inicio, fecha_fin, comentario)
     if error:
+        _registrar_rechazo(f'Solicitud no aceptada ("{error}")', categoria, fecha_inicio, fecha_fin)
         flash(error, 'danger')
         return redirect(url_for('dashboard'))
 
@@ -422,6 +477,7 @@ def editar_solicitud_modal():
 
     if categoria_nueva in CATEGORIAS and _categoria_vencida(categoria_nueva):
         fecha_limite = _limite_categoria(categoria_nueva)
+        _registrar_rechazo('Edición rechazada: plazo de la categoría vencido', categoria_nueva)
         flash(
             f'El plazo para {CATEGORIAS[categoria_nueva]["label"]} venció el '
             f'{fecha_limite.strftime("%d/%m/%Y")}. Consultá con RRHH si corresponde una excepción.',
@@ -439,6 +495,7 @@ def editar_solicitud_modal():
     feriados = cargar_feriados()
     cutoff = calcular_cutoff(fecha_inicio, feriados)
     if datetime.now() > cutoff:
+        _registrar_rechazo('Edición fuera de plazo', categoria_nueva, fecha_inicio, fecha_fin)
         flash(MENSAJE_FUERA_DE_PLAZO, 'fuera-plazo')
         return redirect(url_for('dashboard'))
 
@@ -447,6 +504,8 @@ def editar_solicitud_modal():
         PeriodoVeda.fecha_fin >= fecha_inicio
     ).first()
     if veda:
+        _registrar_rechazo(f'Edición rechazada: período de veda ({veda.motivo})', categoria_nueva,
+                           fecha_inicio, fecha_fin)
         flash(
             f'No se pueden cargar solicitudes entre el {veda.fecha_inicio.strftime("%d/%m/%Y")} y el '
             f'{veda.fecha_fin.strftime("%d/%m/%Y")} ({veda.motivo}).',
@@ -465,6 +524,7 @@ def editar_solicitud_modal():
         return redirect(url_for('dashboard'))
     if categoria_nueva == 'EXAMEN_ESTUDIO' and not agente_actual.examen_estudio_habilitado:
         db.session.rollback()
+        _registrar_rechazo('Edición rechazada: categoría no habilitada', categoria_nueva, fecha_inicio, fecha_fin)
         flash(f'No tenés habilitada la categoría {CATEGORIAS["EXAMEN_ESTUDIO"]["label"]}.', 'danger')
         return redirect(url_for('dashboard'))
 
@@ -479,12 +539,15 @@ def editar_solicitud_modal():
     if choque:
         db.session.rollback()
         existente, inicio, fin = choque
-        flash(mensaje_superposicion(agente_actual, existente, inicio, fin), 'danger')
+        msg = mensaje_superposicion(agente_actual, existente, inicio, fin)
+        _registrar_rechazo(f'Edición rechazada ("{msg}")', categoria_nueva, fecha_inicio, fecha_fin)
+        flash(msg, 'danger')
         return redirect(url_for('dashboard'))
 
     saldo_nuevo = _obtener_o_crear_saldo(solicitud.id_agente, categoria_nueva)
     if saldo_nuevo.dias_disponibles < dias_habiles:
         db.session.rollback()
+        _registrar_rechazo('Edición rechazada: sin días suficientes', categoria_nueva, fecha_inicio, fecha_fin)
         flash(
             f'No tenés suficientes días disponibles en {CATEGORIAS[categoria_nueva]["label"]}. '
             f'Disponibles: {saldo_nuevo.dias_disponibles}.',
@@ -717,6 +780,68 @@ def exportar_reporte_saldos():
     )
 
 
+REGISTROS_POR_PAGINA = 50
+
+
+def _fecha_o_none(texto):
+    try:
+        return datetime.strptime(texto, '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        return None
+
+
+@app.route('/admin/actividad')
+def registro_actividad():
+    if 'id_agente' not in session or not Agente.query.get(session['id_agente']).es_admin:
+        flash('No tienes permiso para acceder a esta página.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    desde = _fecha_o_none(request.args.get('desde'))
+    hasta = _fecha_o_none(request.args.get('hasta'))
+    persona = request.args.get('persona', type=int)
+    tipo = request.args.get('tipo') if request.args.get('tipo') in TIPOS_ACTIVIDAD else None
+
+    consulta = RegistroActividad.query
+    if desde:
+        consulta = consulta.filter(RegistroActividad.fecha >= datetime.combine(desde, time.min))
+    if hasta:
+        consulta = consulta.filter(RegistroActividad.fecha <= datetime.combine(hasta, time.max))
+    if persona:
+        consulta = consulta.filter(RegistroActividad.id_actor == persona)
+    if tipo:
+        consulta = consulta.filter(RegistroActividad.tipo == tipo)
+
+    total = consulta.count()
+    total_paginas = max(1, -(-total // REGISTROS_POR_PAGINA))
+    pagina = min(max(1, request.args.get('pagina', 1, type=int)), total_paginas)
+    registros = (
+        consulta.order_by(RegistroActividad.fecha.desc(), RegistroActividad.id.desc())
+        .offset((pagina - 1) * REGISTROS_POR_PAGINA).limit(REGISTROS_POR_PAGINA).all()
+    )
+
+    # Personas para el filtro: salen de la propia bitácora, así también aparecen
+    # quienes ya fueron eliminados del sistema.
+    personas = (
+        db.session.query(RegistroActividad.id_actor, db.func.max(RegistroActividad.actor))
+        .filter(RegistroActividad.id_actor.isnot(None))
+        .group_by(RegistroActividad.id_actor)
+        .order_by(db.func.max(RegistroActividad.actor))
+        .all()
+    )
+
+    return render_template(
+        'actividad.html',
+        registros=registros, total=total, pagina=pagina, total_paginas=total_paginas,
+        personas=personas, tipos=TIPOS_ACTIVIDAD,
+        filtros={
+            'desde': desde.isoformat() if desde else None,
+            'hasta': hasta.isoformat() if hasta else None,
+            'persona': persona or None,
+            'tipo': tipo,
+        },
+    )
+
+
 @app.route('/admin/carga-oficio', methods=['POST'])
 def carga_oficio():
     if 'id_agente' not in session or not Agente.query.get(session['id_agente']).es_admin:
@@ -759,9 +884,15 @@ def carga_oficio():
         es_oficio=True, constancia_aviso=constancia_aviso, comentario_admin=comentario_admin
     )
     if error:
+        _registrar_rechazo(f'Carga de oficio no aceptada para {agente.nombre_completo} ("{error}")',
+                           categoria, fecha_inicio, fecha_fin)
         flash(error, 'danger')
         return redirect(url_for('panel_admin'))
 
+    registrar_actividad(
+        'solicitud',
+        f'Carga de oficio: {_desc_solicitud(solicitud, agente)} — constancia: {constancia_aviso}'
+    )
     db.session.commit()
     flash(f'Carga de oficio registrada para {agente.nombre_completo}.', 'success')
     return redirect(url_for('panel_admin'))
@@ -792,6 +923,7 @@ def agregar_feriado():
         return redirect(url_for('panel_admin'))
 
     db.session.add(Feriado(fecha=fecha, descripcion=descripcion, tipo=tipo))
+    registrar_actividad('calendario', f'Agregó el feriado {fecha.strftime("%d/%m/%Y")} ({descripcion}, {tipo})')
     db.session.commit()
 
     afectadas = recalcular_por_nuevo_feriado(fecha)
@@ -834,9 +966,14 @@ def editar_feriado(id_feriado):
         return redirect(url_for('panel_admin'))
 
     fecha_cambio = fecha != feriado.fecha
+    anterior = f'{feriado.fecha.strftime("%d/%m/%Y")} ({feriado.descripcion})'
     feriado.fecha = fecha
     feriado.descripcion = descripcion
     feriado.tipo = tipo
+    registrar_actividad(
+        'calendario',
+        f'Editó el feriado {anterior}: ahora {fecha.strftime("%d/%m/%Y")} ({descripcion}, {tipo})'
+    )
     db.session.commit()
 
     # Si se movió la fecha, la nueva fecha se trata igual que un feriado
@@ -908,6 +1045,9 @@ def importar_feriados():
         fechas_nuevas.append(fecha)
         importados += 1
 
+    registrar_actividad(
+        'calendario', f'Importó feriados desde archivo ({importados} nuevos, {omitidos} omitidos)'
+    )
     db.session.commit()
 
     total_recalculadas = 0
@@ -929,6 +1069,9 @@ def eliminar_feriado(id_feriado):
         return redirect(url_for('login'))
 
     feriado = Feriado.query.get_or_404(id_feriado)
+    registrar_actividad(
+        'calendario', f'Eliminó el feriado {feriado.fecha.strftime("%d/%m/%Y")} ({feriado.descripcion})'
+    )
     db.session.delete(feriado)
     db.session.commit()
     flash('Feriado eliminado.', 'success')
@@ -961,6 +1104,11 @@ def agregar_veda():
         return redirect(url_for('panel_admin'))
 
     db.session.add(PeriodoVeda(fecha_inicio=fecha_inicio, fecha_fin=fecha_fin, motivo=motivo))
+    registrar_actividad(
+        'calendario',
+        f'Agregó un período de veda del {fecha_inicio.strftime("%d/%m/%Y")} al '
+        f'{fecha_fin.strftime("%d/%m/%Y")} ({motivo})'
+    )
     db.session.commit()
     flash('Período de veda agregado.', 'success')
     return redirect(url_for('panel_admin'))
@@ -973,6 +1121,11 @@ def eliminar_veda(id_veda):
         return redirect(url_for('login'))
 
     veda = PeriodoVeda.query.get_or_404(id_veda)
+    registrar_actividad(
+        'calendario',
+        f'Eliminó el período de veda del {veda.fecha_inicio.strftime("%d/%m/%Y")} al '
+        f'{veda.fecha_fin.strftime("%d/%m/%Y")} ({veda.motivo})'
+    )
     db.session.delete(veda)
     db.session.commit()
     flash('Período de veda eliminado.', 'success')
@@ -1010,6 +1163,8 @@ def guardar_limites():
             db.session.add(LimiteCategoria(categoria=codigo, fecha_limite=fecha))
             cambios += 1
 
+    if cambios:
+        registrar_actividad('plazos', f'Actualizó los plazos de vigencia ({cambios} cambio(s))')
     db.session.commit()
     if cambios:
         flash('Plazos de vigencia actualizados.', 'success')
@@ -1026,6 +1181,11 @@ def cerrar_ejercicio():
 
     pendientes_abiertas = Solicitud.query.filter_by(estado='Pendiente').count()
     if pendientes_abiertas > 0:
+        registrar_actividad(
+            'rechazo',
+            f'Cierre de ejercicio bloqueado: hay {pendientes_abiertas} solicitud(es) pendiente(s)',
+            commit=True
+        )
         flash(
             f'No se puede cerrar el ejercicio: hay {pendientes_abiertas} solicitud(es) pendiente(s) sin '
             f'resolver. Aprobalas o rechazalas antes de continuar.',
@@ -1034,6 +1194,9 @@ def cerrar_ejercicio():
         return redirect(url_for('panel_admin'))
 
     SaldoLicencia.query.update({SaldoLicencia.dias_usados: 0, SaldoLicencia.dias_pendientes: 0})
+    registrar_actividad(
+        'plazos', 'Cerró el ejercicio: reinició los días usados y pendientes de todos los agentes'
+    )
     db.session.commit()
     flash(
         'Ejercicio cerrado: los saldos no gozados de las 4 categorías vencieron y se reiniciaron. '
@@ -1078,6 +1241,9 @@ def crear_agente():
             cupo = int(request.form.get(f'cupo_{codigo}', meta['cupo_default']))
             db.session.add(SaldoLicencia(id_agente=nuevo_agente.id, categoria=codigo, dias_asignados=cupo))
 
+        registrar_actividad(
+            'agente', f'Creó el agente {nombre} (usuario {usuario}{", administrador" if es_admin else ""})'
+        )
         db.session.commit()
         flash(f"El agente '{nombre}' ha sido creado. Su contraseña es su nombre de usuario.", 'success')
     except Exception as e:
@@ -1107,6 +1273,7 @@ def eliminar_agente(id_agente):
 
     try:
         nombre_eliminado = agente_a_eliminar.nombre_completo
+        registrar_actividad('agente', f'Eliminó al agente {nombre_eliminado} y todas sus solicitudes')
         db.session.delete(agente_a_eliminar)
         db.session.commit()
         flash(f'El agente "{nombre_eliminado}" y todas sus solicitudes han sido eliminados permanentemente.', 'success')
@@ -1134,6 +1301,11 @@ def toggle_agente(id_agente):
     agente_a_modificar.esta_activo = not agente_a_modificar.esta_activo
 
     try:
+        registrar_actividad(
+            'agente',
+            f'{"Activó" if agente_a_modificar.esta_activo else "Desactivó"} la cuenta de '
+            f'{agente_a_modificar.nombre_completo}'
+        )
         db.session.commit()
         nuevo_estado_texto = "Activo" if agente_a_modificar.esta_activo else "Inactivo"
         nuevo_estado_clase = "approved" if agente_a_modificar.esta_activo else "rejected"
@@ -1181,7 +1353,19 @@ def editar_agente(id_agente):
             return redirect(url_for('panel_admin'))
 
     try:
-        agente_a_editar.nombre_completo = request.form.get('nombre_completo')
+        nombre_anterior = agente_a_editar.nombre_completo
+        nombre_nuevo = request.form.get('nombre_completo')
+        cambios = []
+        if nombre_nuevo != agente_a_editar.nombre_completo:
+            cambios.append('nombre')
+        if nuevo_usuario != agente_a_editar.usuario:
+            cambios.append('usuario')
+        if es_admin_form != bool(agente_a_editar.es_admin):
+            cambios.append('rol de administrador')
+        if examen_estudio_form != bool(agente_a_editar.examen_estudio_habilitado):
+            cambios.append(f'habilitación de {CATEGORIAS["EXAMEN_ESTUDIO"]["label"]}')
+
+        agente_a_editar.nombre_completo = nombre_nuevo
         agente_a_editar.usuario = nuevo_usuario
         agente_a_editar.es_admin = es_admin_form
         agente_a_editar.examen_estudio_habilitado = examen_estudio_form
@@ -1191,12 +1375,20 @@ def editar_agente(id_agente):
             if cupo_str is None or cupo_str == '':
                 continue
             saldo = _obtener_o_crear_saldo(agente_a_editar.id, codigo)
+            if int(cupo_str) != saldo.dias_asignados:
+                cambios.append(f'cupo {CATEGORIAS[codigo]["label"]}')
             saldo.dias_asignados = int(cupo_str)
 
         nueva_clave = request.form.get('nueva_clave')
         if nueva_clave:
             agente_a_editar.clave_hash = bcrypt.generate_password_hash(nueva_clave).decode('utf-8')
+            cambios.append('contraseña')
 
+        registrar_actividad(
+            'agente',
+            f'Editó los datos de {nombre_anterior} ' +
+            (f'(cambió: {", ".join(cambios)})' if cambios else '(sin cambios)')
+        )
         db.session.commit()
         flash(f"Los datos de '{agente_a_editar.nombre_completo}' han sido actualizados.", 'success')
     except Exception as e:
@@ -1251,6 +1443,12 @@ def aprobar_solicitud(id_solicitud):
     solicitud.estado = 'Aprobada'
     solicitud.notificado = False
 
+    detalle = f'Aprobó la solicitud de {_desc_solicitud(solicitud, agente)}'
+    if categoria_final != categoria_original:
+        detalle += (f' (reclasificada de {CATEGORIAS[categoria_original]["label"]} '
+                    f'a {CATEGORIAS[categoria_final]["label"]})')
+    registrar_actividad('solicitud', detalle)
+
     db.session.commit()
     if categoria_final != categoria_original:
         flash(
@@ -1282,6 +1480,11 @@ def rechazar_solicitud(id_solicitud):
     solicitud.notificado = False
     solicitud.comentario_admin = request.form.get('comentario_admin')
 
+    detalle = f'Rechazó la solicitud de {_desc_solicitud(solicitud)}'
+    if solicitud.comentario_admin:
+        detalle += f' — motivo: {solicitud.comentario_admin}'
+    registrar_actividad('solicitud', detalle)
+
     db.session.commit()
     flash(f"La solicitud de {solicitud.agente.nombre_completo} ha sido RECHAZADA.", 'warning')
     return redirect(url_for('panel_admin'))
@@ -1302,11 +1505,10 @@ def rectificar_solicitud(id_solicitud):
         )
         if choque:
             existente, inicio, fin = choque
-            flash(
-                'No se puede volver a Pendientes: ' +
-                mensaje_superposicion(solicitud.agente, existente, inicio, fin, es_oficio=True),
-                'warning'
-            )
+            msg = 'No se puede volver a Pendientes: ' + mensaje_superposicion(
+                solicitud.agente, existente, inicio, fin, es_oficio=True)
+            registrar_actividad('rechazo', f'{msg} — {_desc_solicitud(solicitud)}', commit=True)
+            flash(msg, 'warning')
             return redirect(url_for('panel_admin'))
 
     # <-- CORREGIDO: las solicitudes históricas (migradas del sistema
@@ -1337,6 +1539,11 @@ def rectificar_solicitud(id_solicitud):
     solicitud.estado = 'Pendiente'
     solicitud.notificado = True
     solicitud.comentario_admin = None
+
+    registrar_actividad(
+        'solicitud',
+        f'Devolvió a Pendientes la solicitud de {_desc_solicitud(solicitud)} (estaba {estado_anterior})'
+    )
 
     db.session.commit()
 
@@ -1386,6 +1593,7 @@ def admin_eliminar_solicitud(id_solicitud):
     categoria = _normalizar_categoria(solicitud.tipo_licencia) or solicitud.tipo_licencia
     saldo = _obtener_o_crear_saldo(solicitud.id_agente, categoria)
     saldo.dias_pendientes = max(0, saldo.dias_pendientes - solicitud.dias_solicitados)
+    registrar_actividad('solicitud', f'Eliminó la solicitud pendiente de {_desc_solicitud(solicitud)}')
     db.session.delete(solicitud)
     db.session.commit()
 
@@ -1402,6 +1610,7 @@ def publicar_novedad():
     mensaje = _sanitizar_mensaje(request.form['mensaje'])
     nueva_novedad = Novedad(titulo=titulo, mensaje=mensaje)
     db.session.add(nueva_novedad)
+    registrar_actividad('novedad', f'Publicó la novedad "{titulo}"')
     db.session.commit()
     flash('La novedad ha sido publicada exitosamente.', 'success')
     return redirect(url_for('panel_admin'))
@@ -1415,6 +1624,7 @@ def editar_novedad(id_novedad):
     novedad_a_editar = Novedad.query.get_or_404(id_novedad)
     novedad_a_editar.titulo = request.form.get('titulo')
     novedad_a_editar.mensaje = _sanitizar_mensaje(request.form.get('mensaje'))
+    registrar_actividad('novedad', f'Editó la novedad "{novedad_a_editar.titulo}"')
     db.session.commit()
 
     flash('La novedad ha sido actualizada exitosamente.', 'success')
@@ -1427,6 +1637,7 @@ def eliminar_novedad(id_novedad):
         return redirect(url_for('login'))
 
     novedad_a_eliminar = Novedad.query.get_or_404(id_novedad)
+    registrar_actividad('novedad', f'Eliminó la novedad "{novedad_a_eliminar.titulo}"')
     db.session.delete(novedad_a_eliminar)
     db.session.commit()
 

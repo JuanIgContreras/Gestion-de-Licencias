@@ -126,3 +126,31 @@ class Novedad(db.Model):
 
     def __repr__(self):
         return f'<Novedad {self.titulo}>'
+
+
+# Tipos de actividad que registra la bitácora (clave -> etiqueta para el filtro).
+TIPOS_ACTIVIDAD = {
+    'solicitud': 'Solicitudes',
+    'agente': 'Agentes',
+    'calendario': 'Feriados y veda',
+    'plazos': 'Plazos y cierre de ejercicio',
+    'novedad': 'Novedades',
+    'ingreso': 'Ingresos al sistema',
+    'rechazo': 'Intentos rechazados',
+}
+
+
+class RegistroActividad(db.Model):
+    """Bitácora de actividad: solo se agrega, la aplicación no tiene ninguna
+    ruta para editar ni borrar registros. No lleva clave foránea a Agente a
+    propósito: así los registros sobreviven aunque se elimine al agente, y el
+    nombre de quien actuó queda guardado tal como era en ese momento."""
+    id = db.Column(db.Integer, primary_key=True)
+    fecha = db.Column(db.DateTime, nullable=False, default=datetime.now, index=True)
+    id_actor = db.Column(db.Integer, nullable=True, index=True)
+    actor = db.Column(db.String(200), nullable=False)
+    tipo = db.Column(db.String(20), nullable=False, index=True)
+    detalle = db.Column(db.String(500), nullable=False)
+
+    def __repr__(self):
+        return f'<RegistroActividad {self.id} {self.tipo}>'

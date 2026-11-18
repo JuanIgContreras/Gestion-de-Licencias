@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block title %}Registro de Actividad{% endblock %}
+
+{% block content %}
+<header>
+    <h1>Registro de Actividad</h1>
+    <div>
+        <a href="{{ url_for('panel_admin') }}" class="header-btn">Volver al Panel de Admin</a>
+        <a href="{{ url_for('logout') }}" class="header-btn logout">Cerrar Sesión</a>
+    </div>
+</header>
+
+<main class="main-content">
+    <p class="reporte-generado">
+        Bitácora de las acciones de los administradores, los ingresos al sistema y los intentos que el sistema rechazó.
+        Los registros no se pueden editar ni borrar desde el programa. Solo se muestran los hechos desde que se activó esta función.
+    </p>
+
+    <form method="GET" action="{{ url_for('registro_actividad') }}" class="actividad-filtros">
+        <div class="form-group">
+            <label for="f-desde">Desde</label>
+            <input type="date" id="f-desde" name="desde" value="{{ filtros.desde or '' }}">
+        </div>
+        <div class="form-group">
+            <label for="f-hasta">Hasta</label>
+            <input type="date" id="f-hasta" name="hasta" value="{{ filtros.hasta or '' }}">
+        </div>
+        <div class="form-group">
+            <label for="f-persona">Persona</label>
+            <select id="f-persona" name="persona">
+                <option value="">Todas</option>
+                {% for id_actor, nombre in personas %}
+                <option value="{{ id_actor }}" {% if filtros.persona == id_actor %}selected{% endif %}>{{ nombre }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="f-tipo">Tipo de acción</label>
+            <select id="f-tipo" name="tipo">
+                <option value="">Todas</option>
+                {% for clave, etiqueta in tipos.items() %}
+                <option value="{{ clave }}" {% if filtros.tipo == clave %}selected{% endif %}>{{ etiqueta }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <button type="submit" class="submit-btn" style="width: auto;">Filtrar</button>
+        <a href="{{ url_for('registro_actividad') }}" class="header-btn" style="background:#6c757d; color:#fff;">Limpiar</a>
+    </form>
+
+    <p class="reporte-generado">{{ total }} registro(s){% if total_paginas > 1 %} — página {{ pagina }} de {{ total_paginas }}{% endif %}</p>
+
+    <table class="requests-table actividad-tabla">
+        <thead>
+            <tr>
+                <th style="text-align: left;">Fecha y hora</th>
+                <th style="text-align: left;">Persona</th>
+                <th style="text-align: left;">Tipo</th>
+                <th style="text-align: left;">Detalle</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in registros %}
+            <tr>
+                <td class="actividad-fecha">{{ r.fecha.strftime('%d/%m/%Y %H:%M:%S') }}</td>
+                <td>{{ r.actor }}</td>
+                <td><span class="act-badge act-{{ r.tipo }}">{{ tipos.get(r.tipo, r.tipo) }}</span></td>
+                <td>{{ r.detalle }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" style="text-align: center;">No hay registros con esos filtros.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if total_paginas > 1 %}
+    <div class="actividad-paginacion">
+        <a class="header-btn {% if pagina <= 1 %}disabled{% endif %}"
+           href="{{ url_for('registro_actividad', pagina=pagina - 1, desde=filtros.desde, hasta=filtros.hasta, persona=filtros.persona, tipo=filtros.tipo) }}">← Anterior</a>
+        <span>Página {{ pagina }} de {{ total_paginas }}</span>
+        <a class="header-btn {% if pagina >= total_paginas %}disabled{% endif %}"
+           href="{{ url_for('registro_actividad', pagina=pagina + 1, desde=filtros.desde, hasta=filtros.hasta, persona=filtros.persona, tipo=filtros.tipo) }}">Siguiente →</a>
+    </div>
+    {% endif %}
+</main>
+{% endblock %}
