@@ -317,3 +317,124 @@ def test_examen_estudio_funciona_una_vez_habilitado(app, client, crear_agente, p
     assert r.status_code == 302
     with app.app_context():
         assert Solicitud.query.filter_by(id_agente=ag_id, tipo_licencia='EXAMEN_ESTUDIO').count() == 1
+
+
+# --- SUPERPOSICIÓN DE SOLICITUDES DEL MISMO AGENTE ---
+
+def _cargar(client, categoria, inicio, fin=None):
+    return client.post('/nueva-solicitud', data={
+        'tipo_licencia': categoria, 'fecha_inicio': inicio.isoformat(),
+        'fecha_fin': (fin or inicio).isoformat(),
+    }, follow_redirects=True)
+
+
+def _cantidad(app, id_agente):
+    with app.app_context():
+        return Solicitud.query.filter_by(id_agente=id_agente).count()
+
+
+def test_agente_no_puede_cargar_dos_solicitudes_para_el_mismo_dia(app, client, agente_id, proximo_dia_habil):
+    login_como(client, agente_id, 'agente_test')
+    lunes = proximo_dia_habil(14)
+    _cargar(client, 'LAO', lunes)
+    r = _cargar(client, 'INVIERNO', lunes)
+    assert 'Ya tenés una solicitud pendiente' in r.get_data(as_text=True)
+    assert _cantidad(app, agente_id) == 1
+    assert _saldo(app, agente_id, 'INVIERNO')[2] == 0  # no reservó días
+
+
+def test_admin_no_puede_cargar_de_oficio_lo_que_el_agente_ya_cargo(app, client, admin_id, agente_id, proximo_dia_habil):
+    login_como(client, agente_id, 'agente_test')
+    lunes = proximo_dia_habil(14)
+    _cargar(client, 'LAO', lunes)
+
+    login_como(client, admin_id, 'admin_test')
+    r = client.post('/admin/carga-oficio', data={
+        'id_agente': str(agente_id), 'categoria': 'LAO',
+        'fecha_inicio': lunes.isoformat(), 'fecha_fin': lunes.isoformat(),
+        'constancia_aviso': 'Aviso telefónico',
+    }, follow_redirects=True)
+    assert 'ya tiene una solicitud pendiente' in r.get_data(as_text=True)
+    assert _cantidad(app, agente_id) == 1
+    assert _saldo(app, agente_id, 'LAO')[1] == 0  # no se descontó nada de usados
+
+
+def test_superposicion_parcial_es_rechazada_y_dias_contiguos_no(app, client, agente_id, proximo_dia_habil):
+    login_como(client, agente_id, 'agente_test')
+    lunes = proximo_dia_habil(14)
+    _cargar(client, 'LAO', lunes, lunes + dt.timedelta(days=2))  # lun-mié
+
+    r = _cargar(client, 'LAO', lunes + dt.timedelta(days=2), lunes + dt.timedelta(days=4))  # mié-vie
+    assert 'entre el' in r.get_data(as_text=True) or 'Ya tenés una solicitud' in r.get_data(as_text=True)
+    assert _cantidad(app, agente_id) == 1
+
+    _cargar(client, 'LAO', lunes + dt.timedelta(days=3), lunes + dt.timedelta(days=4))  # jue-vie, contiguo
+    assert _cantidad(app, agente_id) == 2
+
+
+def test_solicitud_rechazada_no_bloquea_una_nueva_para_el_mismo_dia(app, client, admin_id, agente_id, proximo_dia_habil):
+    login_como(client, agente_id, 'agente_test')
+    lunes = proximo_dia_habil(14)
+    _cargar(client, 'LAO', lunes)
+    with app.app_context():
+        sol_id = Solicitud.query.filter_by(id_agente=agente_id).first().id
+    login_como(client, admin_id, 'admin_test')
+    client.post(f'/rechazar_solicitud/{sol_id}', data={'comentario_admin': 'no'})
+
+    login_como(client, agente_id, 'agente_test')
+    _cargar(client, 'LAO', lunes)
+    assert _cantidad(app, agente_id) == 2
+
+
+def test_coincidir_solo_en_fin_de_semana_no_cuenta_como_superposicion(app, client, agente_id, proximo_dia_habil):
+    login_como(client, agente_id, 'agente_test')
+    lunes = proximo_dia_habil(14)
+    sabado = lunes + dt.timedelta(days=5)
+    _cargar(client, 'LAO', lunes, sabado)  # lun-sáb: 5 días hábiles
+    # sáb-lun siguiente: comparte solo el sábado, que no es hábil
+    _cargar(client, 'LAO', sabado, lunes + dt.timedelta(days=7))
+    assert _cantidad(app, agente_id) == 2
+
+
+def test_editar_solicitud_no_puede_pisar_otra_pero_si_conservar_sus_fechas(app, client, agente_id, proximo_dia_habil):
+    login_como(client, agente_id, 'agente_test')
+    lunes = proximo_dia_habil(14)
+    martes = lunes + dt.timedelta(days=1)
+    _cargar(client, 'LAO', lunes)
+    _cargar(client, 'LAO', martes)
+    with app.app_context():
+        id_martes = Solicitud.query.filter_by(id_agente=agente_id, fecha_inicio=martes).first().id
+
+    r = client.post('/editar-solicitud-modal', data={
+        'id_solicitud': id_martes, 'tipo_licencia': 'LAO',
+        'fecha_inicio': lunes.isoformat(), 'fecha_fin': lunes.isoformat(),
+    }, follow_redirects=True)
+    assert 'Ya tenés una solicitud pendiente' in r.get_data(as_text=True)
+    with app.app_context():
+        assert Solicitud.query.get(id_martes).fecha_inicio == martes
+
+    r2 = client.post('/editar-solicitud-modal', data={
+        'id_solicitud': id_martes, 'tipo_licencia': 'LAO',
+        'fecha_inicio': martes.isoformat(), 'fecha_fin': martes.isoformat(),
+        'comentario_agente': 'sin cambios de fecha',
+    }, follow_redirects=True)
+    assert 'actualizada correctamente' in r2.get_data(as_text=True)
+
+
+def test_no_se_puede_devolver_a_pendientes_una_rechazada_que_pisa_otra_activa(app, client, admin_id, agente_id, proximo_dia_habil):
+    login_como(client, agente_id, 'agente_test')
+    lunes = proximo_dia_habil(14)
+    _cargar(client, 'LAO', lunes)
+    with app.app_context():
+        rechazada_id = Solicitud.query.filter_by(id_agente=agente_id).first().id
+    login_como(client, admin_id, 'admin_test')
+    client.post(f'/rechazar_solicitud/{rechazada_id}', data={'comentario_admin': 'no'})
+
+    login_como(client, agente_id, 'agente_test')
+    _cargar(client, 'LAO', lunes)  # nueva activa para el mismo día
+
+    login_como(client, admin_id, 'admin_test')
+    r = client.post(f'/admin/rectificar-solicitud/{rechazada_id}', data={}, follow_redirects=True)
+    assert 'No se puede volver a Pendientes' in r.get_data(as_text=True)
+    with app.app_context():
+        assert Solicitud.query.get(rechazada_id).estado == 'Rechazada'

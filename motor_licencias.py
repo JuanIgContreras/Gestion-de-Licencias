@@ -157,6 +157,40 @@ def _categoria_vencida(categoria: str) -> bool:
     return fecha_limite is not None and date.today() > fecha_limite
 
 
+def buscar_superposicion(id_agente: int, fecha_inicio: date, fecha_fin: date,
+                         feriados: set, excluir_id=None):
+    """Busca una solicitud Pendiente o Aprobada del mismo agente que comparta
+    al menos un día hábil con el rango dado (las Rechazadas no bloquean).
+    Devuelve (solicitud, primer_dia, ultimo_dia) del tramo compartido, o None.
+    Se compara por días hábiles y no por fechas crudas: dos rangos que solo
+    coinciden en un sábado o un feriado no se pisan en la práctica."""
+    candidatas = Solicitud.query.filter(
+        Solicitud.id_agente == id_agente,
+        Solicitud.estado.in_(('Pendiente', 'Aprobada')),
+        Solicitud.fecha_inicio <= fecha_fin,
+        Solicitud.fecha_fin >= fecha_inicio,
+    )
+    if excluir_id is not None:
+        candidatas = candidatas.filter(Solicitud.id != excluir_id)
+    for s in candidatas.order_by(Solicitud.fecha_inicio).all():
+        inicio = max(s.fecha_inicio, fecha_inicio)
+        fin = min(s.fecha_fin, fecha_fin)
+        if contar_dias_habiles(inicio, fin, feriados) > 0:
+            return s, inicio, fin
+    return None
+
+
+def mensaje_superposicion(agente, existente, inicio: date, fin: date, es_oficio: bool = False) -> str:
+    tramo = (f'el {inicio.strftime("%d/%m/%Y")}' if inicio == fin
+             else f'entre el {inicio.strftime("%d/%m/%Y")} y el {fin.strftime("%d/%m/%Y")}')
+    estado = existente.estado.lower()
+    if es_oficio:
+        return (f'{agente.nombre_completo} ya tiene una solicitud {estado} que abarca {tramo}. '
+                f'No se pueden cargar dos licencias para el mismo día: gestioná o eliminá la existente primero.')
+    return (f'Ya tenés una solicitud {estado} que abarca {tramo}. '
+            f'No se pueden cargar dos licencias para el mismo día.')
+
+
 def _crear_solicitud(agente, categoria, fecha_inicio, fecha_fin, comentario,
                       es_oficio=False, constancia_aviso=None, comentario_admin=None):
     """Valida y crea una Solicitud. Devuelve (solicitud, error) — si hay
@@ -175,6 +209,11 @@ def _crear_solicitud(agente, categoria, fecha_inicio, fecha_fin, comentario,
     dias_habiles = contar_dias_habiles(fecha_inicio, fecha_fin, feriados)
     if dias_habiles <= 0:
         return None, 'El rango elegido no contiene días hábiles administrativos.'
+
+    choque = buscar_superposicion(agente.id, fecha_inicio, fecha_fin, feriados)
+    if choque:
+        existente, inicio, fin = choque
+        return None, mensaje_superposicion(agente, existente, inicio, fin, es_oficio)
 
     saldo = _obtener_o_crear_saldo(agente.id, categoria)
     if saldo.dias_disponibles < dias_habiles:

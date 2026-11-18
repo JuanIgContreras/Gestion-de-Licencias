@@ -18,3 +18,5 @@ database.backup-*.db
 # Archivos de Excel con datos de usuarios
 # Estos archivos contienen información sensible
 *.xlsx
+# Backups automáticos de la base (ver backup_db.py)
+backups/

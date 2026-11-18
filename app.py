@@ -16,6 +16,7 @@ from motor_licencias import (
     CUTOFF_HORA, cargar_feriados, contar_dias_habiles, fecha_fin_para_n_dias_habiles,
     calcular_cutoff, recalcular_por_nuevo_feriado, _obtener_o_crear_saldo,
     _normalizar_categoria, _limite_categoria, _categoria_vencida, _crear_solicitud,
+    buscar_superposicion, mensaje_superposicion,
     _sanitizar_mensaje,
 )
 
@@ -471,6 +472,14 @@ def editar_solicitud_modal():
     if dias_habiles <= 0:
         db.session.rollback()
         flash('El rango elegido no contiene días hábiles administrativos.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    choque = buscar_superposicion(solicitud.id_agente, fecha_inicio, fecha_fin, feriados,
+                                  excluir_id=solicitud.id)
+    if choque:
+        db.session.rollback()
+        existente, inicio, fin = choque
+        flash(mensaje_superposicion(agente_actual, existente, inicio, fin), 'danger')
         return redirect(url_for('dashboard'))
 
     saldo_nuevo = _obtener_o_crear_saldo(solicitud.id_agente, categoria_nueva)
@@ -1286,6 +1295,20 @@ def rectificar_solicitud(id_solicitud):
     solicitud = Solicitud.query.get_or_404(id_solicitud)
     estado_anterior = solicitud.estado
 
+    if estado_anterior == 'Rechazada':
+        choque = buscar_superposicion(
+            solicitud.id_agente, solicitud.fecha_inicio, solicitud.fecha_fin or solicitud.fecha_inicio,
+            cargar_feriados(), excluir_id=solicitud.id,
+        )
+        if choque:
+            existente, inicio, fin = choque
+            flash(
+                'No se puede volver a Pendientes: ' +
+                mensaje_superposicion(solicitud.agente, existente, inicio, fin, es_oficio=True),
+                'warning'
+            )
+            return redirect(url_for('panel_admin'))
+
     # <-- CORREGIDO: las solicitudes históricas (migradas del sistema
     # anterior) tienen tipo_licencia en texto libre ("Vacaciones Enero", etc.)
     # en vez de un código de CATEGORIAS. Sin normalizar, el saldo se
@@ -1673,4 +1696,14 @@ def obtener_licencias_calendario(year, month):
 
 # --- INICIAR LA APLICACIÓN ---
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5001, debug=False)
+    # Backup automático al arrancar (una vez por día); ver backup_db.py.
+    import backup_db
+    if not backup_db.hay_backup_de_hoy():
+        try:
+            print(f'[backup] {backup_db.hacer_backup()}')
+        except Exception as e:
+            print(f'[backup] ERROR: {e}')
+
+    # waitress es un servidor apto para producción (gunicorn no corre en Windows).
+    from waitress import serve
+    serve(app, host='0.0.0.0', port=5001, threads=8)
